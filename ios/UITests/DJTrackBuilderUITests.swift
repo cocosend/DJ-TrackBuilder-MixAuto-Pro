@@ -48,16 +48,14 @@ final class DJTrackBuilderUITests: XCTestCase {
         snapshot("03-auto")
     }
 
-    func testWaveformAndHotCueControls() throws {
+    func testWaveformAndEmptyFileCueState() throws {
         XCTAssertTrue(app.otherElements["Deck A waveform"].exists ||
                       app.staticTexts["PCM SIGNAL OVERVIEW · ORIGINAL PATTERNS"].exists)
-        let cue = app.buttons["Deck A hot cue 1: set"]
-        XCTAssertTrue(cue.exists, "Empty hot-cue slot should be accessible")
-        let page = app.buttons["HOT CUES 5–8"]
-        XCTAssertTrue(page.exists)
-        page.tap()
-        XCTAssertTrue(app.buttons["Deck A hot cue 5: set"].exists)
-        snapshot("04-hot-cues")
+        // Cues are intentionally file-only: the first launch contains only
+        // original pattern decks, so there is no position to store or jump to.
+        XCTAssertFalse(app.buttons["Deck A hot cue 1: set"].exists)
+        XCTAssertFalse(app.buttons["Deck A hot cue 5: set"].exists)
+        snapshot("04-empty-file-cues")
     }
 
     private func snapshot(_ name: String) {
