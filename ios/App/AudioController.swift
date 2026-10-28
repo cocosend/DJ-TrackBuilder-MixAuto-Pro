@@ -198,7 +198,9 @@ final class AudioController: ObservableObject {
 
     deinit {
         // Stop the mixer tap before removing the graph.
-        liveRecorder?.stop()
+        // Swift 6 treats deinit as nonisolated. This controller is owned by
+        // SwiftUI's main-actor StateObject; remove its tap on that same actor.
+        MainActor.assumeIsolated { [liveRecorder] in liveRecorder?.stop() }
         audioEngine.stop()
         if let source { audioEngine.detach(source) }
         if let interruptionObserver { NotificationCenter.default.removeObserver(interruptionObserver) }
