@@ -2,7 +2,7 @@
 
 The **FIRST approved nine-page Canva** design is the only visual target: [open the canonical concept](https://www.canva.com/d/UoJgnHMYH-EJu2u). The later redesign is rejected. This is a separate project from Stripewolf Wave, ARTSS DJ Creator and DJ NOVA.
 
-**Project state: SOURCE ONLY.** No separate GitHub repo, signed IPA, device installation, published URL or verified iPhone playback exists. The completed portable Linux tests below cannot prove Core Audio runtime behavior.
+**Project state: iOS Simulator build verified.** The source is in its own private GitHub repository. Xcode 16.4 built and launched the app in an iPhone 16 Pro simulator; both native audio graph tests and all three UI tests passed. A signed IPA, physical iPhone installation and on-device audio verification still require Apple signing and a connected device.
 
 ## What this source currently contains
 
@@ -29,8 +29,7 @@ actual `AVAudioEngine` in offline/manual mode. It feeds **two independently
 scheduled audio files into EQ/Delay/mixer** and verifies nonzero PCM output;
 a second test checks repeated AVAudioPlayerNode `.loops` output. XCUITest UI
 smokes open WAVE/MIX/STEMS/BUILDER/FX/AUTO and save simulator screenshots. These
-checks are **prepared but have not been executed**, since no macOS host is
-connected. They cannot prove iPhone audio latency, speaker routing or master
+checks passed on the GitHub Actions macOS runner. They cannot prove iPhone audio latency, speaker routing or master
 recording.
 
 From the source root on any appropriately configured Mac with Xcode + XcodeGen:
@@ -42,7 +41,7 @@ scripts/ios_build_on_mac.sh
 It produces `ios-build-results/` with a **simulator-only unsigned `.app`**, XCTest
 result bundle, test logs and the cockpit screenshot. The file is **not an IPA**
 and cannot be installed on a physical iPhone. The same test matrix runs in
-`.github/workflows/ci.yml` when this project has its OWN isolated GitHub repo.
+`.github/workflows/ci.yml` in this project's isolated GitHub repo.
 No other DJ app repository should be used as a substitute.
 
 ## Alternative manual simulator build on Mac
@@ -87,7 +86,9 @@ The source-only ZIP includes a `SOURCE_SHA256SUMS.txt` manifest and excludes gen
 ### Current 0.6.0 validation status
 
 Portable DSP and Swift Foundation tests: run `scripts/verify_linux.sh`.
-Apple's audio graph integration tests and SwiftUI UI smoke: **not run on this
-Linux host**; GitHub Actions macOS template and local one-command Mac script
-are supplied. A real installation requires signing/provisioning after those
-builds pass. Preserve the first nine-page Canva design as sole visual target.
+Apple's audio graph integration tests: **2/2 passed** on iPhone 16 Pro Simulator.
+SwiftUI UI smoke: **3/3 passed**; simulator app and screenshot are in the CI artifact.
+Portable DSP/Linux CI also passed. A physical iPhone installation requires a
+development signing team/provisioning profile and a connected iPhone or a
+TestFlight distribution setup. Preserve the first nine-page Canva design as
+sole visual target.
