@@ -59,6 +59,14 @@ jobs:
           -sdk iphonesimulator
           -destination 'generic/platform=iOS Simulator'
           -configuration Debug CODE_SIGNING_ALLOWED=NO build
+      - name: Compile for physical iPhone architecture without signing
+        run: >-
+          xcodebuild -project DJTrackBuilderMixAutoPro.xcodeproj
+          -scheme DJTrackBuilderMixAutoPro
+          -sdk iphoneos
+          -destination 'generic/platform=iOS'
+          -derivedDataPath "$RUNNER_TEMP/MixAutoDeviceDerivedData"
+          -configuration Release CODE_SIGNING_ALLOWED=NO build
       - name: Select and boot an actual iOS Simulator device
         id: sim
         shell: bash
@@ -102,6 +110,11 @@ jobs:
             xcrun simctl launch "${{ steps.sim.outputs.id }}" com.artss.trackbuilder.mixautopro || true
             sleep 3
             xcrun simctl io "${{ steps.sim.outputs.id }}" screenshot "$RUNNER_TEMP/MixAutoArtifacts/First-Canva-Cockpit-Simulator.png" || true
+          fi
+          if test -d "$RUNNER_TEMP/MixAutoDeviceDerivedData/Build/Products/Release-iphoneos/DJTrackBuilderMixAutoPro.app"; then
+            ditto -c -k --sequesterRsrc --keepParent \
+              "$RUNNER_TEMP/MixAutoDeviceDerivedData/Build/Products/Release-iphoneos/DJTrackBuilderMixAutoPro.app" \
+              "$RUNNER_TEMP/MixAutoArtifacts/MixAuto-iPhone-Unsigned-NOT-INSTALLABLE.zip"
           fi
           if test -d "$RUNNER_TEMP/MixAutoUITests.xcresult"; then
             ditto -c -k --sequesterRsrc --keepParent "$RUNNER_TEMP/MixAutoUITests.xcresult" "$RUNNER_TEMP/MixAutoArtifacts/MixAutoUITests-xcresult.zip"
