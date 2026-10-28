@@ -92,3 +92,23 @@ Portable DSP/Linux CI also passed. A physical iPhone installation requires a
 development signing team/provisioning profile and a connected iPhone or a
 TestFlight distribution setup. Preserve the first nine-page Canva design as
 sole visual target.
+
+## Signed installation on a registered iPhone
+
+The manual GitHub Actions workflow **Signed iPhone development IPA** archives
+and exports a development-signed `.ipa`. It needs four repository Actions
+secrets, set in GitHub rather than committed or sent in chat:
+
+- `IOS_DEVELOPMENT_P12_BASE64`: base64 of the Apple Development certificate
+  and its private key exported as a `.p12`.
+- `IOS_P12_PASSWORD`: password of that `.p12`.
+- `IOS_PROVISIONING_PROFILE_BASE64`: base64 of a development `.mobileprovision`
+  for `com.artss.trackbuilder.mixautopro`, with the intended iPhone UDID registered.
+- `IOS_TEAM_ID`: the Apple Developer Team ID matching the profile.
+
+After those are configured, run **Actions → Signed iPhone development IPA → Run
+workflow**. The workflow checks the profile's Team ID and bundle ID, builds an
+archive and uploads an IPA artifact only if export succeeds. The current CI
+artifact contains unsigned simulator and device builds and cannot be installed
+on a physical iPhone. Development signing also does not verify real speaker,
+Bluetooth or recording behavior; exercise those after installation.
