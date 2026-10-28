@@ -1,5 +1,17 @@
 # DJ TrackBuilder MixAuto Pro — native source checkpoint 0.6.0 (Apple simulator CI gate)
 
+## React web app (0.7.0)
+
+The `web/` directory contains a runnable React + TypeScript version for mobile Safari and Chrome. It retains the first Canva cockpit look and uses Web Audio for two file or synthesized-pattern decks, crossfader, EQ, filter, echo, editable step patterns, eight file cues per deck, approximate beat loops, AutoMix fader transitions, local project settings and master recording where MediaRecorder supports audio. Files are decoded in the browser and are not uploaded. Imported song STEM separation and pitch-preserving Sync are not implemented; the interface labels those limits.
+
+```bash
+cd web
+npm ci
+npm run dev
+```
+
+For production assets run `npm run build` and serve `web/dist/` over HTTPS. Browsers require a user gesture before audio starts. Recording downloads as `.m4a` or `.webm` depending on browser support. A saved project JSON contains pattern and mixer settings, not audio files; import songs again after reopening. This web app is not a signed iOS IPA. The existing native iOS code remains under `ios/` and `native/`.
+
 The **FIRST approved nine-page Canva** design is the only visual target: [open the canonical concept](https://www.canva.com/d/UoJgnHMYH-EJu2u). The later redesign is rejected. This is a separate project from Stripewolf Wave, ARTSS DJ Creator and DJ NOVA.
 
 **Project state: iOS Simulator build verified.** The source is in its own private GitHub repository. Xcode 16.4 built and launched the app in an iPhone 16 Pro simulator; both native audio graph tests and all three UI tests passed. A signed IPA, physical iPhone installation and on-device audio verification still require Apple signing and a connected device.
