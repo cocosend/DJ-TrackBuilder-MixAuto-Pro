@@ -1,4 +1,4 @@
-import { DJ_MATRIX, type PresetKey } from './presets'
+import { DJ_MATRIX, stripeFilter, type PresetKey } from './presets'
 export type DeckIndex = 0 | 1
 export type Voice = 'kick' | 'hat' | 'bass'
 export type Pattern = Record<Voice, boolean[]>
@@ -52,6 +52,12 @@ type DeckRuntime = {
   mid: BiquadFilterNode
   high: BiquadFilterNode
   filterNode: BiquadFilterNode
+  punch: BiquadFilterNode
+  driveIn: GainNode
+  driveOut: GainNode
+  lfo: OscillatorNode | null
+  lfoGain: GainNode | null
+  loadId: number
   drive: WaveShaperNode
   delay: DelayNode
   feedback: GainNode
@@ -78,7 +84,7 @@ export class MixEngine {
 
   private async ready() {
     if (!this.context) {
-      const ctx = new AudioContext()
+      const ctx = new AudioContext({ latencyHint: 'interactive' })
       const output = ctx.createGain()
       const media = ctx.createMediaStreamDestination()
       const limiter = ctx.createDynamicsCompressor()
@@ -95,15 +101,17 @@ export class MixEngine {
         const mid = ctx.createBiquadFilter(); mid.type = 'peaking'; mid.frequency.value = 1000; mid.Q.value = .7
         const high = ctx.createBiquadFilter(); high.type = 'highshelf'; high.frequency.value = 4000
         const filterNode = ctx.createBiquadFilter(); filterNode.type = 'lowpass'; filterNode.frequency.value = 20000
+        const punch = ctx.createBiquadFilter(); punch.type = 'lowshelf'; punch.frequency.value = 110
+        const driveIn = ctx.createGain(), driveOut = ctx.createGain()
         const drive = ctx.createWaveShaper(); drive.oversample = '2x'
         const delay = ctx.createDelay(1); delay.delayTime.value = .28
         const feedback = ctx.createGain(); feedback.gain.value = .25
         const wet = ctx.createGain(); wet.gain.value = 0
-        gain.connect(low).connect(mid).connect(high).connect(filterNode).connect(drive).connect(output)
-        drive.connect(delay).connect(wet).connect(output)
+        gain.connect(low).connect(mid).connect(high).connect(filterNode).connect(punch).connect(driveIn).connect(drive).connect(driveOut).connect(output)
+        driveOut.connect(delay).connect(wet).connect(output)
         delay.connect(feedback).connect(delay)
         return { buffer: null, source: null, offset: 0, startedAt: 0, nextStepAt: 0,
-          step: 0, gain, low, mid, high, filterNode, drive, delay, feedback, wet }
+          step: 0, gain, low, mid, high, filterNode, punch, driveIn, driveOut, lfo: null, lfoGain: null, loadId: 0, drive, delay, feedback, wet }
       }) as [DeckRuntime, DeckRuntime]
       this.setCrossfade(this.crossfade)
       this.decks.forEach((d, i) => {
@@ -136,15 +144,15 @@ export class MixEngine {
   }
   setEcho(deck: DeckIndex, value: number) {
     this.decks[deck].echo = value
-    this.runtime?.[deck].wet.gain.setTargetAtTime(value * .55, this.context!.currentTime, .02)
+    this.runtime?.[deck].wet.gain.setTargetAtTime(value * (this.decks[deck].preset ? .18 * .17 : .55), this.context!.currentTime, .02)
   }
   applyPreset(deck: DeckIndex, key: PresetKey) {
     const preset = DJ_MATRIX[key]
     this.decks[deck].preset = key
-    this.decks[deck].filter = Math.log(preset.cutoff / 120) / Math.log(20000 / 120)
-    this.decks[deck].echo = .25
+    this.decks[deck].filter = Math.log(stripeFilter(preset).cutoff / 120) / Math.log(20000 / 120)
+    this.decks[deck].echo = 1
     this.configurePreset(deck)
-    this.setFilter(deck, this.decks[deck].filter); this.setEcho(deck, .25)
+    this.setFilter(deck, this.decks[deck].filter); this.setEcho(deck, 1)
   }
   clearPreset(deck: DeckIndex) {
     this.decks[deck].preset = null; this.configurePreset(deck)
@@ -154,17 +162,27 @@ export class MixEngine {
     const r = this.runtime?.[deck], ctx = this.context
     if (!r || !ctx) return
     const key = this.decks[deck].preset, preset = key ? DJ_MATRIX[key] : null
-    r.filterNode.type = preset?.filterType ?? 'lowpass'
-    r.filterNode.Q.setTargetAtTime(preset?.resonance ?? 1, ctx.currentTime, .02)
+    r.filterNode.type = 'lowpass'
+    r.lfo?.stop(); r.lfo?.disconnect(); r.lfoGain?.disconnect(); r.lfo = null; r.lfoGain = null
+    r.punch.gain.setTargetAtTime(preset?.has909Punch ? 4 : 0, ctx.currentTime, .08)
+    r.driveIn.gain.setTargetAtTime(preset ? 1 + preset.drive / 2500 : 1, ctx.currentTime, .08)
+    r.driveOut.gain.setTargetAtTime(preset ? 1.95 : 1, ctx.currentTime, .08)
+    r.filterNode.Q.setTargetAtTime(preset ? stripeFilter(preset).q : 1, ctx.currentTime, .02)
     r.delay.delayTime.setTargetAtTime(preset?.delayTime ?? .28, ctx.currentTime, .02)
-    r.feedback.gain.setTargetAtTime(preset?.feedback ?? .25, ctx.currentTime, .02)
+    r.feedback.gain.setTargetAtTime(preset ? Math.min(.16, preset.feedback * .35) : .25, ctx.currentTime, .02)
     if (preset) {
-      const amount = 1 + preset.drive / 150, curve = new Float32Array(2048)
+      const amount = 1 + preset.drive / 400, curve = new Float32Array(2048)
       for (let i = 0; i < curve.length; i++) {
         const x = i * 2 / (curve.length - 1) - 1
-        curve[i] = Math.tanh(x * amount) / Math.tanh(amount)
+        curve[i] = Math.tanh(x * amount) / amount
       }
       r.drive.curve = curve
+      if (preset.has303Acid) {
+        r.lfo = ctx.createOscillator(); r.lfoGain = ctx.createGain()
+        r.lfo.frequency.value = 1.6 + preset.resonance / 40
+        r.lfoGain.gain.value = stripeFilter(preset).cutoff * .08
+        r.lfo.connect(r.lfoGain).connect(r.filterNode.frequency); r.lfo.start()
+      }
     } else r.drive.curve = null
   }
   setBank(deck: DeckIndex, bank: number) { this.decks[deck].bank = Math.max(0, Math.min(3, bank)) }
@@ -172,7 +190,9 @@ export class MixEngine {
 
   async load(deck: DeckIndex, file: File) {
     await this.ready()
+    const runtime = this.runtime![deck], request = ++runtime.loadId
     const buffer = await this.context!.decodeAudioData(await file.arrayBuffer())
+    if (request !== runtime.loadId) return
     this.pause(deck)
     const r = this.runtime![deck]
     r.buffer = buffer; r.offset = 0
@@ -190,7 +210,7 @@ export class MixEngine {
   }
   usePattern(deck: DeckIndex) {
     this.pause(deck)
-    const r = this.runtime?.[deck]; if (r) { r.buffer = null; r.offset = 0 }
+    const r = this.runtime?.[deck]; if (r) { r.loadId++; r.buffer = null; r.offset = 0 }
     Object.assign(this.decks[deck], { kind: 'pattern', title: deck === 0 ? 'Night Circuit' : 'Retro Coast',
       duration: 0, peaks: demoPeaks(deck), cues: Array(8).fill(null), loopBeats: 0, position: 0 })
   }
@@ -269,7 +289,7 @@ export class MixEngine {
     if (this.ticker !== null) return
     this.ticker = window.setInterval(() => {
       const ctx = this.context
-      if (!ctx || !this.runtime) return
+      if (!ctx || !this.runtime || ctx.state !== 'running') return
       let active = false
       this.runtime.forEach((r, i) => {
         const d = this.decks[i]
@@ -279,18 +299,23 @@ export class MixEngine {
         while (r.nextStepAt < ctx.currentTime + .12) {
           const step = r.step % 16
           const pattern = this.patterns[d.bank]
-          if (pattern.kick[step] && !d.muted.kick) this.kick(r, r.nextStepAt)
+          if (pattern.kick[step] && !d.muted.kick) this.kick(r, r.nextStepAt, d.preset ? DJ_MATRIX[d.preset].has909Punch : false)
           if (pattern.hat[step] && !d.muted.hat) this.hat(r, r.nextStepAt)
           if (pattern.bass[step] && !d.muted.bass) this.bass(r, r.nextStepAt, step)
+          if (d.preset && !d.muted.bass) {
+            const preset = DJ_MATRIX[d.preset]
+            if (preset.has808Sub && (step === 0 || step === 10)) this.sub(r, r.nextStepAt)
+            if (preset.has303Acid) this.acid(r, r.nextStepAt, step, preset.cutoff, preset.resonance)
+          }
           r.step++; r.nextStepAt += 60 / d.bpm / 4
         }
       })
       if (!active && this.ticker !== null) { clearInterval(this.ticker); this.ticker = null }
     }, 25)
   }
-  private kick(r: DeckRuntime, at: number) {
+  private kick(r: DeckRuntime, at: number, punch: boolean) {
     const ctx = this.context!, osc = ctx.createOscillator(), amp = ctx.createGain()
-    osc.type = 'sine'; osc.frequency.setValueAtTime(155, at); osc.frequency.exponentialRampToValueAtTime(48, at + .15)
+    osc.type = 'sine'; osc.frequency.setValueAtTime(punch ? 190 : 140, at); osc.frequency.exponentialRampToValueAtTime(punch ? 48 : 52, at + (punch ? .07 : .14))
     amp.gain.setValueAtTime(.8, at); amp.gain.exponentialRampToValueAtTime(.001, at + .25)
     osc.connect(amp).connect(r.gain); osc.start(at); osc.stop(at + .26)
   }
@@ -313,6 +338,26 @@ export class MixEngine {
     amp.gain.setValueAtTime(.001, at); amp.gain.linearRampToValueAtTime(.22, at + .012)
     amp.gain.exponentialRampToValueAtTime(.001, at + .19)
     osc.connect(amp).connect(r.gain); osc.start(at); osc.stop(at + .2)
+  }
+
+  private sub(r: DeckRuntime, at: number) {
+    const ctx = this.context!, osc = ctx.createOscillator(), amp = ctx.createGain()
+    osc.frequency.setValueAtTime(85, at); osc.frequency.exponentialRampToValueAtTime(38, at + .45)
+    amp.gain.setValueAtTime(.0001, at); amp.gain.exponentialRampToValueAtTime(.25, at + .02)
+    amp.gain.exponentialRampToValueAtTime(.0001, at + .85)
+    osc.connect(amp).connect(r.gain); osc.start(at); osc.stop(at + 1)
+  }
+  private acid(r: DeckRuntime, at: number, step: number, cutoff: number, resonance: number) {
+    const notes = [0,0,12,0,3,0,10,0,0,12,0,7,0,3,10,5]
+    const accent = [0,4,9,12,15].includes(step)
+    const ctx = this.context!, osc = ctx.createOscillator(), filter = ctx.createBiquadFilter(), amp = ctx.createGain()
+    osc.type = 'sawtooth'; osc.frequency.value = 55 * 2 ** (notes[step] / 12)
+    filter.type = 'lowpass'; filter.Q.value = resonance
+    filter.frequency.setValueAtTime(Math.min(6000, cutoff * (accent ? 3.4 : 1.4)), at)
+    filter.frequency.exponentialRampToValueAtTime(Math.max(50, cutoff * .5), at + .22)
+    amp.gain.setValueAtTime(.0001, at); amp.gain.exponentialRampToValueAtTime(accent ? .12 : .08, at + .005)
+    amp.gain.exponentialRampToValueAtTime(.0001, at + .24)
+    osc.connect(filter).connect(amp).connect(r.gain); osc.start(at); osc.stop(at + .3)
   }
 
   async startRecording() {
@@ -340,6 +385,8 @@ export class MixEngine {
   dispose() {
     if (this.ticker !== null) clearInterval(this.ticker)
     this.decks.forEach((_, i) => this.pause(i as DeckIndex))
+    this.runtime?.forEach(r => { r.loadId++; r.lfo?.stop(); r.lfo?.disconnect(); r.lfoGain?.disconnect() })
+    if (this.recorder?.state === 'recording') this.recorder.stop()
     void this.context?.close()
   }
 }
