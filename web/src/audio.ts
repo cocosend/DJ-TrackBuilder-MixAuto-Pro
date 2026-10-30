@@ -1,8 +1,11 @@
+import { DEMOS } from './demos'
 import { DJ_MATRIX, stripeFilter, type PresetKey } from './presets'
 export type DeckIndex = 0 | 1
 export type Voice = 'kick' | 'hat' | 'bass'
 export type Pattern = Record<Voice, boolean[]>
 export type DeckSnapshot = {
+  demo: number | null
+  rate: number
   title: string
   kind: 'pattern' | 'file'
   duration: number
@@ -13,7 +16,7 @@ export type DeckSnapshot = {
   bank: number
   peaks: number[]
   cues: Array<number | null>
-  loopBeats: 0 | 4 | 8 | 16
+  loopBeats: 0 | 1 | 2 | 4 | 8 | 16
   volume: number
   eq: [number, number, number]
   filter: number
@@ -57,6 +60,8 @@ type DeckRuntime = {
   driveOut: GainNode
   lfo: OscillatorNode | null
   lfoGain: GainNode | null
+  loopStart: number
+  loopEnd: number
   loadId: number
   drive: WaveShaperNode
   delay: DelayNode
@@ -76,7 +81,7 @@ export class MixEngine {
   patterns = makePatterns()
   decks: [DeckSnapshot, DeckSnapshot] = [0, 1].map(i => ({
     title: i === 0 ? 'Night Circuit' : 'Retro Coast', kind: 'pattern', duration: 0,
-    playing: false, position: 0, bpm: 132, bank: 0, preset: null,
+    demo: null, rate: 1, playing: false, position: 0, bpm: 132, bank: 0, preset: null,
     peaks: demoPeaks(i), cues: Array(8).fill(null), loopBeats: 0,
     volume: .85, eq: [0, 0, 0], filter: 1, echo: 0,
     muted: { kick: false, hat: false, bass: false },
@@ -111,7 +116,7 @@ export class MixEngine {
         driveOut.connect(delay).connect(wet).connect(output)
         delay.connect(feedback).connect(delay)
         return { buffer: null, source: null, offset: 0, startedAt: 0, nextStepAt: 0,
-          step: 0, gain, low, mid, high, filterNode, punch, driveIn, driveOut, lfo: null, lfoGain: null, loadId: 0, drive, delay, feedback, wet }
+          step: 0, gain, low, mid, high, filterNode, punch, driveIn, driveOut, lfo: null, lfoGain: null, loopStart: 0, loopEnd: 0, loadId: 0, drive, delay, feedback, wet }
       }) as [DeckRuntime, DeckRuntime]
       this.setCrossfade(this.crossfade)
       this.decks.forEach((d, i) => {
@@ -186,32 +191,61 @@ export class MixEngine {
     } else r.drive.curve = null
   }
   setBank(deck: DeckIndex, bank: number) { this.decks[deck].bank = Math.max(0, Math.min(3, bank)) }
-  setBpm(deck: DeckIndex, bpm: number) { this.decks[deck].bpm = Math.max(60, Math.min(200, bpm)) }
+  setBpm(deck: DeckIndex, bpm: number) { this.decks[deck].bpm = Math.max(60, Math.min(200, bpm)); const source=this.runtime?.[deck].source; if(source && this.decks[deck].loopBeats) this.applyLoop(deck,source) }
 
   async load(deck: DeckIndex, file: File) {
+    if(file.size>100*1024*1024) throw new Error('Выбери аудиофайл размером до 100 МБ')
     await this.ready()
     const runtime = this.runtime![deck], request = ++runtime.loadId
     const buffer = await this.context!.decodeAudioData(await file.arrayBuffer())
     if (request !== runtime.loadId) return
+    if(buffer.duration>480) throw new Error('Максимальная длина трека — 8 минут')
+    this.installBuffer(deck, buffer, file.name.replace(/\.[^.]+$/, ''))
+  }
+  private installBuffer(deck: DeckIndex, buffer: AudioBuffer, title: string, demo: number | null = null) {
     this.pause(deck)
     const r = this.runtime![deck]
     r.buffer = buffer; r.offset = 0
     const samples = buffer.getChannelData(0)
-    const peaks = Array.from({ length: 160 }, (_, i) => {
-      const begin = Math.floor(i * samples.length / 160)
-      const end = Math.min(samples.length, Math.floor((i + 1) * samples.length / 160))
-      const stride = Math.max(1, Math.floor((end - begin) / 192))
-      let peak = 0
-      for (let j = begin; j < end; j += stride) peak = Math.max(peak, Math.abs(samples[j]))
+    const peaks = Array.from({length:160}, (_, i) => {
+      const begin=Math.floor(i*samples.length/160), end=Math.floor((i+1)*samples.length/160)
+      const stride=Math.max(1,Math.floor((end-begin)/192)); let peak=0
+      for(let j=begin;j<end;j+=stride) peak=Math.max(peak,Math.abs(samples[j]))
       return peak
     })
-    Object.assign(this.decks[deck], { title: file.name.replace(/\.[^.]+$/, ''), kind: 'file',
-      duration: buffer.duration, peaks, cues: Array(8).fill(null), loopBeats: 0, position: 0 })
+    Object.assign(this.decks[deck], {title,kind:'file',demo,rate:1,duration:buffer.duration,peaks,cues:Array(8).fill(null),loopBeats:demo===null?0:16,position:0})
+    this.decks[deck].bpm=demo===null?120:DEMOS[demo].bpm
   }
+  async loadDemo(deck: DeckIndex, index: number) {
+    if(!DEMOS[index]) throw new Error('Демо не найдено')
+    await this.ready()
+    const runtime=this.runtime![deck], request=++runtime.loadId, ctx=this.context!
+    const worker=new Worker(new URL('./demo-worker.ts',import.meta.url),{type:'module'})
+    try {
+      const channels=await new Promise<[Float32Array,Float32Array]>((resolve,reject)=>{
+        worker.onmessage=event=>event.data.error?reject(new Error(event.data.error)):resolve(event.data.channels)
+        worker.onerror=()=>reject(new Error('Не удалось подготовить демо'))
+        worker.postMessage({index,sampleRate:ctx.sampleRate})
+      })
+      if(request!==runtime.loadId) return
+      const buffer=ctx.createBuffer(2,channels[0].length,ctx.sampleRate)
+      buffer.getChannelData(0).set(channels[0]);buffer.getChannelData(1).set(channels[1])
+      this.installBuffer(deck,buffer,DEMOS[index].name+' · DEMO',index)
+    } finally { worker.terminate() }
+  }
+  setRate(deck: DeckIndex, rate: number) {
+    if(!Number.isFinite(rate)) return
+    const d=this.decks[deck],r=this.runtime?.[deck]
+    if(d.kind!=='file') return
+    const position=this.position(deck)
+    d.rate=Math.max(.5,Math.min(1.5,rate))
+    if(r && this.context){r.offset=position;r.startedAt=this.context.currentTime;if(r.source) r.source.playbackRate.setValueAtTime(d.rate,this.context.currentTime)}
+  }
+
   usePattern(deck: DeckIndex) {
     this.pause(deck)
     const r = this.runtime?.[deck]; if (r) { r.loadId++; r.buffer = null; r.offset = 0 }
-    Object.assign(this.decks[deck], { kind: 'pattern', title: deck === 0 ? 'Night Circuit' : 'Retro Coast',
+    Object.assign(this.decks[deck], { kind: 'pattern', demo: null, rate: 1, title: deck === 0 ? 'Night Circuit' : 'Retro Coast',
       duration: 0, peaks: demoPeaks(deck), cues: Array(8).fill(null), loopBeats: 0, position: 0 })
   }
   async play(deck: DeckIndex) {
@@ -223,9 +257,10 @@ export class MixEngine {
       const source = ctx.createBufferSource()
       source.buffer = r.buffer
       source.connect(r.gain)
+      source.playbackRate.value=d.rate
       if (d.loopBeats) this.applyLoop(deck, source)
       const offset = Math.min(r.offset, Math.max(0, r.buffer.duration - .001))
-      r.startedAt = ctx.currentTime - offset
+      r.startedAt = ctx.currentTime
       r.source = source
       source.onended = () => {
         if (r.source === source) { r.source = null; d.playing = false; r.offset = 0; d.position = 0 }
@@ -239,7 +274,7 @@ export class MixEngine {
   pause(deck: DeckIndex) {
     const d = this.decks[deck], r = this.runtime?.[deck]
     if (r && d.kind === 'file' && d.playing && this.context) {
-      r.offset = Math.min(r.buffer?.duration ?? 0, this.context.currentTime - r.startedAt)
+      r.offset = this.position(deck)
       r.source?.stop(); r.source = null
     }
     d.playing = false
@@ -248,11 +283,11 @@ export class MixEngine {
     const d = this.decks[deck], r = this.runtime?.[deck]
     if (d.kind !== 'file' || !r?.buffer) return 0
     if (!d.playing || !this.context) return r.offset
-    const t = this.context.currentTime - r.startedAt
+    const t = r.offset + (this.context.currentTime - r.startedAt) * d.rate
     if (d.loopBeats) {
-      const len = Math.min(r.buffer.duration, d.loopBeats * 60 / d.bpm)
-      const start = Math.floor(r.offset / len) * len
-      return start + ((t - start) % len + len) % len
+      const len=r.loopEnd-r.loopStart
+      if(len>0 && t>=r.loopEnd) return r.loopStart+((t-r.loopStart)%len+len)%len
+      return Math.min(r.buffer.duration,t)
     }
     return Math.min(r.buffer.duration, t)
   }
@@ -270,9 +305,10 @@ export class MixEngine {
     if (!r.buffer || !d.loopBeats) return
     const len = Math.min(r.buffer.duration, d.loopBeats * 60 / d.bpm)
     const start = Math.floor(r.offset / len) * len
-    source.loop = true; source.loopStart = start; source.loopEnd = Math.min(r.buffer.duration, start + len)
+    r.loopStart=start;r.loopEnd=Math.min(r.buffer.duration,start+len)
+    source.loop = true; source.loopStart=r.loopStart; source.loopEnd=r.loopEnd
   }
-  async setLoop(deck: DeckIndex, beats: 0 | 4 | 8 | 16) {
+  async setLoop(deck: DeckIndex, beats: 0 | 1 | 2 | 4 | 8 | 16) {
     const r = this.runtime?.[deck]
     if (!r?.buffer) return
     const pos = this.position(deck), active = this.decks[deck].playing
