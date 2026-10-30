@@ -26,22 +26,18 @@ function Waveform({ deck, index, zoom, onSeek }: { deck: DeckSnapshot; index: De
       el.width = Math.round(rect.width * dpr); el.height = Math.round(rect.height * dpr)
       const c = el.getContext('2d'); if (!c) return
       c.scale(dpr, dpr)
-      const w = rect.width, h = rect.height, bars = Math.max(12, Math.floor(w / (3 * zoom)))
-      const colors = index === 0 ? ['#ff4d50', '#ff961f', '#ffd04c', '#e44fae', '#55ddcd'] : ['#ff4d50', '#ff9729', '#ffd449', '#d75bc0', '#50dbcf']
-      const yCenter = h * .48
-      for (let n = 0; n < bars; n++) {
-        const idx = Math.min(deck.peaks.length - 1, Math.floor(n * deck.peaks.length / bars))
-        const peak = deck.peaks[idx] || 0
-        const rhythm = Math.abs(Math.sin(idx * 1.18 + index * 3))
-        const length = Math.max(4, (peak * .72 + rhythm * .18) * w * .83)
-        const x = n * w / bars + 1
-        for (let band = 0; band < 5; band++) {
-          const variation = .2 + .8 * Math.abs(Math.sin(idx * (.22 + band * .23) + band))
-          const span = Math.min(w * .46, length * variation / 2)
-          c.fillStyle = colors[band]
-          c.fillRect(x, yCenter - span, Math.max(1.4, w / bars - 1.2), span * 2)
-        }
+      const w=rect.width,h=rect.height,bars=Math.max(32,Math.floor(h/(3*zoom)))
+      c.strokeStyle='#262b31';c.lineWidth=1
+      for(let n=0;n<8;n++){const y=n*h/7;c.beginPath();c.moveTo(0,y);c.lineTo(w,y);c.stroke()}
+      const color=index===0?'#4ed8eb':'#ff865c'
+      for(let n=0;n<bars;n++){
+        const sample=deck.peaks[Math.min(deck.peaks.length-1,Math.floor(n*deck.peaks.length/bars))]||0
+        const span=Math.max(1,sample*w*.43), y=n*h/bars
+        const gradient=c.createLinearGradient(w/2-span,0,w/2+span,0)
+        gradient.addColorStop(0,color+'22');gradient.addColorStop(.5,color);gradient.addColorStop(1,color+'22')
+        c.fillStyle=gradient;c.fillRect(w/2-span,y,span*2,Math.max(1,h/bars-1))
       }
+      c.strokeStyle=color+'88';c.beginPath();c.moveTo(w/2,0);c.lineTo(w/2,h);c.stroke()
 
     }
     const observer = new ResizeObserver(draw); observer.observe(el); draw()
@@ -73,7 +69,7 @@ function App() {
   const projectInput = useRef<HTMLInputElement>(null)
   const [loading, setLoading] = useState<[boolean, boolean]>([false, false])
   const [library, setLibrary] = useState<'demos'|'fx'>('demos')
-  const [mode, setMode] = useState<Mode>('PRESETS')
+  const [mode, setMode] = useState<Mode>('WAVE')
   const [version, setVersion] = useState(0)
   const [zoom, setZoom] = useState(1)
   const [selected, setSelected] = useState<DeckIndex>(0)

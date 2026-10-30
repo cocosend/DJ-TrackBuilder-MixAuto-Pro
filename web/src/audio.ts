@@ -93,9 +93,11 @@ export class MixEngine {
       const output = ctx.createGain()
       const media = ctx.createMediaStreamDestination()
       const limiter = ctx.createDynamicsCompressor()
-      limiter.threshold.value = -6; limiter.knee.value = 6; limiter.ratio.value = 12
-      limiter.attack.value = .003; limiter.release.value = .15
-      output.connect(limiter)
+      limiter.threshold.value = -2.4; limiter.knee.value = 1.2; limiter.ratio.value = 18
+      limiter.attack.value = .002; limiter.release.value = .085
+      const headroom=ctx.createGain();headroom.gain.value=.65
+      const dc=ctx.createBiquadFilter();dc.type='highpass';dc.frequency.value=20;dc.Q.value=.707
+      output.connect(headroom).connect(dc).connect(limiter)
       limiter.connect(ctx.destination)
       limiter.connect(media)
       this.context = ctx
