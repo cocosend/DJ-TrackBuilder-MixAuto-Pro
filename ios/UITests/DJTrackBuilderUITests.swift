@@ -58,6 +58,18 @@ final class DJTrackBuilderUITests: XCTestCase {
         snapshot("04-empty-file-cues")
     }
 
+    func testLandscapeKeepsBothDeckTransportsReachable() throws {
+        XCUIDevice.shared.orientation = .landscapeLeft
+        defer { XCUIDevice.shared.orientation = .portrait }
+        XCTAssertTrue(app.buttons["Play Deck A"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.buttons["Play Deck A"].isHittable)
+        XCTAssertTrue(app.buttons["Play Deck B"].isHittable)
+        XCTAssertTrue(app.sliders["Crossfader: A to B"].isHittable)
+        XCTAssertTrue(app.buttons["Load audio to Deck A"].isHittable)
+        XCTAssertTrue(app.buttons["Load audio to Deck B"].isHittable)
+        snapshot("05-landscape-cockpit")
+    }
+
     private func snapshot(_ name: String) {
         let screenshot = XCUIScreen.main.screenshot()
         let attachment = XCTAttachment(screenshot: screenshot)

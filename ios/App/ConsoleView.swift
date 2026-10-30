@@ -46,23 +46,27 @@ struct ConsoleView: View {
     @State private var showingGridEditor = false
 
     var body: some View {
-        VStack(spacing: 0) {
-            header
-            Rectangle().fill(Spectral.rule).frame(height: 1)
-            Group {
-                switch mode {
-                case .wave: waveScreen
-                case .mix: mixerScreen
-                case .stems: stemsScreen
-                case .builder: builderScreen
-                case .fx: fxScreen
-                case .auto: autoScreen
+        GeometryReader { geometry in
+            if geometry.size.width > geometry.size.height {
+                HStack(spacing: 0) {
+                    VStack(spacing: 0) {
+                        header
+                        workspace
+                    }
+                    Rectangle().fill(Spectral.rule).frame(width: 1)
+                    ScrollView(.vertical) { controlRail }
+                        .frame(width: min(320, geometry.size.width * 0.38))
+                        .background(Spectral.panel)
+                }
+            } else {
+                VStack(spacing: 0) {
+                    header
+                    Rectangle().fill(Spectral.rule).frame(height: 1)
+                    workspace
+                    Rectangle().fill(Spectral.rule).frame(height: 1)
+                    controlRail
                 }
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .clipped()
-            Rectangle().fill(Spectral.rule).frame(height: 1)
-            controlRail
         }
         .background(Spectral.bg.ignoresSafeArea())
         .foregroundStyle(Spectral.ink)
@@ -84,6 +88,21 @@ struct ConsoleView: View {
         .onReceive(Timer.publish(every: 0.08, on: .main, in: .common).autoconnect()) { _ in
             if audio.playing { audio.refreshRealtimeStatus() }
         }
+    }
+
+    @ViewBuilder private var workspace: some View {
+        Group {
+            switch mode {
+            case .wave: waveScreen
+            case .mix: mixerScreen
+            case .stems: stemsScreen
+            case .builder: builderScreen
+            case .fx: fxScreen
+            case .auto: autoScreen
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .clipped()
     }
 
     private func accent(_ deck: Int) -> Color { deck == 0 ? Spectral.a : Spectral.b }
@@ -149,6 +168,7 @@ struct ConsoleView: View {
                     Text(meta?.title ?? (deck == 0 ? "Night Circuit" : "Retro Coast"))
                         .font(.system(size: 12, weight: .semibold))
                         .lineLimit(1)
+                        .minimumScaleFactor(0.8)
                     Text(audio.importingDeck == deck ? "IMPORTING..." :
                         meta == nil ? "BANK \(TrackProject.bankNames[audio.project.bank[deck]]) · SYNTH" :
                         "FILE · \(timeString(meta!.duration))")
@@ -196,7 +216,7 @@ struct ConsoleView: View {
             .padding(.vertical, 9)
             HStack(spacing: 1) {
                 ForEach(0..<2, id: \.self) { deck in
-                    TimelineView(.periodic(from: .now, by: 0.0167)) { _ in
+                    TimelineView(.animation(minimumInterval: 1.0 / 60.0, paused: !audio.deckPlaying[deck])) { _ in
                         VerticalWaveform(waveform: audio.waveforms[deck],
                             progress: audio.deckProgress(deck),
                             isActive: audio.deckPlaying[deck],
@@ -431,8 +451,9 @@ struct ConsoleView: View {
             Image(systemName: audio.deckPlaying[deck] ? "pause.fill" : "play.fill")
                 .font(.system(size: 21, weight: .semibold))
                 .foregroundStyle(Spectral.ink)
-                .frame(width: 62, height: 58)
-                .background(Spectral.raised, in: RoundedRectangle(cornerRadius: 12))
+                .frame(width: 58, height: 58)
+                .background(Spectral.bg, in: Circle())
+                .overlay(Circle().stroke(accent(deck), lineWidth: 1))
                 .overlay(RoundedRectangle(cornerRadius: 12).stroke(
                     audio.deckPlaying[deck] ? accent(deck) : Spectral.rule, lineWidth: 1.5))
         }
@@ -1008,7 +1029,7 @@ private struct VerticalWaveform: View {
                         }
                     }
                     for (index, path) in groups.enumerated() {
-                        context.stroke(path, with: .color(Spectral.spectrum[index]),
+                        context.stroke(path, with: .color(accent.opacity(1.0 - Double(index) * 0.12)),
                                        lineWidth: max(1.0, stepHeight * 0.72))
                     }
                     // No imaginary bar lines for loaded files. If the
@@ -1050,10 +1071,10 @@ private struct VerticalWaveform: View {
                         context.stroke(cueLines, with: .color(accent.opacity(0.85)), lineWidth: 1.5)
                     }
                 }
-                // White bar marker and high-contrast red transport line.
+                // Fixed playhead matches the approved Wave / Flow reference.
                 Rectangle()
-                    .fill(Color(red: 1, green: 0.21, blue: 0.19))
-                    .frame(height: 2)
+                    .fill(Spectral.ink.opacity(0.92))
+                    .frame(height: 1)
                     .position(x: proxy.size.width / 2, y: proxy.size.height / 2)
                 VStack {
                     HStack {
