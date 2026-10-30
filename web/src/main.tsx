@@ -2,10 +2,11 @@ import { useEffect, useRef, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import { ArrowLeftRight, CircleHelp, Disc3, FileAudio2, Mic2, Pause, Play, Plus, RotateCcw, Save, SlidersHorizontal, Upload, Waves, ZoomIn, ZoomOut } from 'lucide-react'
 import { BANK_NAMES, MixEngine, type DeckIndex, type DeckSnapshot, type Pattern, type Voice } from './audio'
+import { DJ_MATRIX, type PresetKey } from './presets'
 import './style.css'
 
-type Mode = 'WAVE' | 'MIX' | 'STEMS' | 'BUILDER' | 'FX' | 'AUTO'
-const modes: Mode[] = ['WAVE', 'MIX', 'STEMS', 'BUILDER', 'FX', 'AUTO']
+type Mode = 'PRESETS' | 'WAVE' | 'MIX' | 'STEMS' | 'BUILDER' | 'FX' | 'AUTO'
+const modes: Mode[] = ['WAVE', 'PRESETS', 'MIX', 'BUILDER', 'FX', 'AUTO']
 const voiceNames: Record<Voice, string> = { kick: 'KICK', hat: 'HAT', bass: 'BASS' }
 
 function stamp(t: number) {
@@ -40,28 +41,23 @@ function Waveform({ deck, index, zoom, onSeek }: { deck: DeckSnapshot; index: De
           c.fillRect(x, yCenter - span, Math.max(1.4, w / bars - 1.2), span * 2)
         }
       }
-      const progress = deck.kind === 'file' && deck.duration ? deck.position / deck.duration : .5
-      c.fillStyle = '#ff444c'; c.fillRect(0, Math.max(0, h * (1 - progress) - 1), w, 2)
+
     }
     const observer = new ResizeObserver(draw); observer.observe(el); draw()
     return () => observer.disconnect()
-  }, [deck.peaks, deck.duration, deck.kind, deck.position, index, zoom])
+  }, [deck.peaks, index, zoom])
   return <div className="wave-panel">
     <canvas ref={canvas} className="vertical-wave" role="img" aria-label={`Обзор сигнала деки ${index === 0 ? 'A' : 'B'}`} onClick={e => {
       if (deck.kind !== 'file') return
       const rect = e.currentTarget.getBoundingClientRect()
       onSeek(Math.max(0, Math.min(1, 1 - (e.clientY - rect.top) / rect.height)))
     }} />
+    <span className="playhead" style={{ top: `${100 * (1 - (deck.kind === 'file' && deck.duration ? deck.position / deck.duration : .5))}%` }} />
     <span className={`wave-letter deck-${index}`}>{index === 0 ? 'A' : 'B'}</span>
     <span className="wave-caption">{deck.kind === 'file' ? `${stamp(deck.position)} / ${stamp(deck.duration)}` : 'PATTERN / FOUR BARS'}</span>
   </div>
 }
 
-function MiniWave({ deck, index }: { deck: DeckSnapshot; index: DeckIndex }) {
-  return <div className={`mini-wave deck-${index}`} aria-hidden="true">
-    {Array.from({ length: 64 }, (_, i) => <i key={i} style={{ height: `${Math.max(2, (deck.peaks[i * 2] || .3) * 20)}px` }} />)}
-  </div>
-}
 
 function Slider({ label, value, min = 0, max = 1, step = .01, onChange, deck }: {
   label: string; value: number; min?: number; max?: number; step?: number; onChange: (v: number) => void; deck?: DeckIndex
@@ -71,10 +67,10 @@ function Slider({ label, value, min = 0, max = 1, step = .01, onChange, deck }: 
 }
 
 function App() {
-  const engine = useRef(new MixEngine())
+  const [engine] = useState(() => new MixEngine())
   const fileInputs = useRef<[HTMLInputElement | null, HTMLInputElement | null]>([null, null])
   const projectInput = useRef<HTMLInputElement>(null)
-  const [mode, setMode] = useState<Mode>('WAVE')
+  const [mode, setMode] = useState<Mode>('PRESETS')
   const [version, setVersion] = useState(0)
   const [zoom, setZoom] = useState(1)
   const [selected, setSelected] = useState<DeckIndex>(0)
@@ -82,10 +78,11 @@ function App() {
   const [auto, setAuto] = useState(false)
   const [autoBars, setAutoBars] = useState(8)
   const [message, setMessage] = useState('')
+  const noticeTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   const autoRef = useRef({ start: 0, from: .5, to: 1 })
-  const e = engine.current, decks = e.decks
+  const e = engine, decks = e.decks
   const refresh = () => setVersion(v => v + 1)
-  const notice = (text: string) => { setMessage(text); window.setTimeout(() => setMessage(''), 4500) }
+  const notice = (text: string) => { setMessage(text); clearTimeout(noticeTimer.current); noticeTimer.current = setTimeout(() => setMessage(''), 4500) }
   const run = (action: () => Promise<unknown> | void) => {
     try { Promise.resolve(action()).then(refresh).catch(error => notice(error instanceof Error ? error.message : 'Не удалось выполнить действие.')) }
     catch (error) { notice(error instanceof Error ? error.message : 'Не удалось выполнить действие.') }
@@ -97,12 +94,13 @@ function App() {
         refresh()
       }
     }, 150)
-    return () => { clearInterval(id); e.dispose() }
+    return () => { clearInterval(id); clearTimeout(noticeTimer.current); e.dispose() }
   }, [e])
   useEffect(() => {
     if (!auto) return
     let frame = 0
     autoRef.current = { start: performance.now(), from: e.crossfade, to: e.crossfade < .5 ? 1 : 0 }
+    let lastPaint = 0
     const tick = (now: number) => {
       const current = autoRef.current
       const bpm = (decks[0].bpm + decks[1].bpm) / 2
@@ -111,7 +109,8 @@ function App() {
       const transition = Math.min(1, Math.max(0, (progress - .65) / .35))
       e.setCrossfade(current.from + (current.to - current.from) * (transition * transition * (3 - 2 * transition)))
       if (progress >= 1) autoRef.current = { start: now, from: current.to, to: current.to === 1 ? 0 : 1 }
-      refresh(); frame = requestAnimationFrame(tick)
+      if (now - lastPaint >= 33) { refresh(); lastPaint = now }
+      frame = requestAnimationFrame(tick)
     }
     frame = requestAnimationFrame(tick)
     return () => cancelAnimationFrame(frame)
@@ -123,7 +122,7 @@ function App() {
   }
   const saveProject = () => {
     const data = { version: 1, crossfade: e.crossfade, autoBars, patterns: e.patterns,
-      decks: decks.map(d => ({ bpm: d.bpm, bank: d.bank, volume: d.volume, eq: d.eq,
+      decks: decks.map(d => ({ preset: d.preset, bpm: d.bpm, bank: d.bank, volume: d.volume, eq: d.eq,
         filter: d.filter, echo: d.echo, muted: d.muted })) }
     download(new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' }), 'mixauto-project.json')
     notice('Настройки проекта сохранены. Аудиофайлы не включены.')
@@ -138,6 +137,8 @@ function App() {
     if (Array.isArray(project.patterns) && project.patterns.length === 4 && project.patterns.every(p => ['kick', 'hat', 'bass'].every(v => Array.isArray(p[v as Voice]) && p[v as Voice].length === 16 && p[v as Voice].every(x => typeof x === 'boolean')))) e.patterns = project.patterns
     project.decks.forEach((saved, i) => {
       const deck = i as DeckIndex
+      if (saved.preset && Object.hasOwn(DJ_MATRIX, saved.preset)) e.applyPreset(deck, saved.preset)
+      else e.clearPreset(deck)
       if (typeof saved.bpm === 'number') e.setBpm(deck, saved.bpm)
       if (Number.isInteger(saved.bank) && saved.bank! >= 0 && saved.bank! <= 3) e.setBank(deck, saved.bank!)
       if (typeof saved.volume === 'number' && saved.volume >= 0 && saved.volume <= 1) e.setVolume(deck, saved.volume)
@@ -173,23 +174,25 @@ function App() {
     <input className="visually-hidden" type="file" accept="audio/*,.mp3,.wav,.m4a,.aac,.ogg,.flac" ref={node => { fileInputs.current[1] = node }} onChange={ev => { run(() => loadFile(1, ev.target.files?.[0])); ev.target.value = '' }} aria-label="Файл для деки B" />
     <input className="visually-hidden" type="file" accept="application/json,.json" ref={projectInput} onChange={ev => { run(() => openProject(ev.target.files?.[0])); ev.target.value = '' }} aria-label="Открыть проект" />
 
-    <header className="topbar"><div className="brand"><Waves size={22} strokeWidth={3} /><strong>TRACKBUILDER</strong><span>/ MIXAUTO PRO</span></div><button className="auto-pill" onClick={() => setMode('AUTO')}>AUTO</button></header>
+    <header className="topbar"><div className="brand"><Waves size={22} strokeWidth={3} /><strong>TRACKBUILDER</strong><span>/ MIXAUTO PRO</span></div><span className="edition">STUDIO 0.8</span></header>
     <section className="decks-head">{deckCard(0)}<span className="deck-divider" />{deckCard(1)}</section>
-    <section className="signal-strip">{([0, 1] as DeckIndex[]).map(i => <div className={`signal-mini deck-${i}`} key={i}><strong>{i === 0 ? 'A' : 'B'}</strong><MiniWave deck={decks[i]} index={i} /><span>{decks[i].kind === 'file' ? 'FULL' : 'BAR 1–4'}</span></div>)}</section>
+
 
     <main>
+      {mode === 'PRESETS' && <section className="mode-body presets-body"><div className="section-heading"><div><span className="eyebrow">ТВОЯ КОЛЛЕКЦИЯ</span><h2>Характер звука</h2></div><span className="preset-count">07</span></div><p>Прежние профили фильтра и задержки. Выбери деку, затем пресет. BPM и трек сохраняются.</p><div className="deck-choice" aria-label="Дека для пресета">{([0, 1] as DeckIndex[]).map(i => <button key={i} aria-pressed={selected === i} className={selected === i ? `chosen deck-${i}` : ''} onClick={() => setSelected(i)}>ДЕКА {i === 0 ? 'A' : 'B'} · {decks[i].preset ? decks[i].preset.toUpperCase() : 'ЧИСТЫЙ ЗВУК'}</button>)}</div><div className="preset-grid">{(Object.entries(DJ_MATRIX) as [PresetKey, typeof DJ_MATRIX[PresetKey]][]).map(([key, p], index) => <button key={key} className={`preset-card ${decks[selected].preset === key ? 'active' : ''}`} aria-pressed={decks[selected].preset === key} onClick={() => { e.applyPreset(selected, key); refresh() }}><span className="preset-index">0{index + 1}</span><span><strong>{key.toUpperCase()}</strong><small>{p.style}</small></span><span className="preset-dot" /></button>)}</div><div className="preset-detail">{decks[selected].preset ? <><strong>{DJ_MATRIX[decks[selected].preset!].name}</strong><span>{DJ_MATRIX[decks[selected].preset!].cutoff} Hz · Q {DJ_MATRIX[decks[selected].preset!].resonance} · Delay {DJ_MATRIX[decks[selected].preset!].delayTime}s</span></> : <span>Выбери характер для деки {selected === 0 ? 'A' : 'B'}</span>}<button className="subtle" onClick={() => { e.clearPreset(selected); refresh() }}>Сбросить пресет</button></div><p className="hint">Профили вдохновлены стилями артистов. Перегруз адаптирован к этому движку; это не оригинальные записи или фирменные пресеты артистов.</p></section>}
+
       {mode === 'WAVE' && <section className="wave-screen"><div className="wave-pair">{([0, 1] as DeckIndex[]).map(i => <Waveform key={i} deck={decks[i]} index={i} zoom={zoom} onSeek={fraction => run(() => e.seek(i, fraction * decks[i].duration))} />)}</div>
         <div className="wave-footer"><span>PCM SIGNAL OVERVIEW · {decks.some(d => d.kind === 'file') ? 'IMPORTED AUDIO' : 'ORIGINAL PATTERNS'}</span><div><button aria-label="Уменьшить сигнал" onClick={() => setZoom(v => Math.max(.5, v / 1.5))}><ZoomOut size={20} /></button><button aria-label="Увеличить сигнал" onClick={() => setZoom(v => Math.min(4, v * 1.5))}><ZoomIn size={20} /></button></div></div>
         {decks.some(d => d.kind === 'file') && <div className="cue-row">{([0, 1] as DeckIndex[]).map(i => <div key={i} className={`cue-deck deck-${i}`}><span>DECK {i === 0 ? 'A' : 'B'}</span><div>{decks[i].kind === 'file' && decks[i].cues.map((cue, n) => <button key={n} className={cue !== null ? 'set' : ''} title={cue === null ? 'Установить метку' : `Перейти к ${stamp(cue)}; удерживай для перезаписи`} onClick={() => run(() => cue === null ? e.setCue(i, n) : e.jumpCue(i, n))} onContextMenu={ev => { ev.preventDefault(); e.setCue(i, n); refresh() }}>{n + 1}</button>)}</div><select value={decks[i].loopBeats} onChange={ev => run(() => e.setLoop(i, Number(ev.target.value) as 0 | 4 | 8 | 16))} disabled={decks[i].kind !== 'file'} aria-label={`Цикл деки ${i === 0 ? 'A' : 'B'}`}><option value="0">LOOP OFF</option><option value="4">4 BEATS</option><option value="8">8 BEATS</option><option value="16">16 BEATS</option></select></div>)}</div>}
       </section>}
       {mode === 'MIX' && <section className="mode-body"><h2>Микшер <SlidersHorizontal size={20} /></h2><p>Уровни и частоты каждой деки управляют живым звуком.</p><div className="mode-columns">{([0, 1] as DeckIndex[]).map(i => <div className={`control-card deck-${i}`} key={i}><h3>DECK {i === 0 ? 'A' : 'B'}</h3><Slider label="LEVEL" value={decks[i].volume} onChange={v => { e.setVolume(i, v); refresh() }} deck={i} />{(['LOW', 'MID', 'HIGH'] as const).map((name, j) => <Slider key={name} label={name} value={decks[i].eq[j]} min={-18} max={18} step={1} onChange={v => { e.setEq(i, j as 0 | 1 | 2, v); refresh() }} deck={i} />)}<button className="subtle" onClick={() => { for (let j = 0; j < 3; j++) e.setEq(i, j as 0 | 1 | 2, 0); refresh() }}>RESET EQ</button></div>)}</div></section>}
-      {mode === 'STEMS' && <section className="mode-body"><h2>Каналы паттерна <Disc3 size={20} /></h2><p>Отключай Kick, Hat и Bass в синтезированных паттернах. Разделение импортированных песен на дорожки недоступно.</p><div className="mode-columns">{([0, 1] as DeckIndex[]).map(i => <div className={`control-card deck-${i}`} key={i}><h3>DECK {i === 0 ? 'A' : 'B'}</h3>{(['kick', 'hat', 'bass'] as Voice[]).map(voice => <button key={voice} disabled={decks[i].kind === 'file'} className={`voice-toggle ${decks[i].muted[voice] ? 'muted' : ''}`} onClick={() => { decks[i].muted[voice] = !decks[i].muted[voice]; refresh() }}><span>{voiceNames[voice]}</span><b>{decks[i].muted[voice] ? 'MUTED' : 'ON'}</b></button>)}</div>)}</div></section>}
+      {mode === 'BUILDER' && <section className="mode-body"><h2>Каналы паттерна <Disc3 size={20} /></h2><p>Отключай Kick, Hat и Bass в синтезированных паттернах. Разделение импортированных песен на дорожки недоступно.</p><div className="mode-columns">{([0, 1] as DeckIndex[]).map(i => <div className={`control-card deck-${i}`} key={i}><h3>DECK {i === 0 ? 'A' : 'B'}</h3>{(['kick', 'hat', 'bass'] as Voice[]).map(voice => <button key={voice} disabled={decks[i].kind === 'file'} className={`voice-toggle ${decks[i].muted[voice] ? 'muted' : ''}`} onClick={() => { decks[i].muted[voice] = !decks[i].muted[voice]; refresh() }}><span>{voiceNames[voice]}</span><b>{decks[i].muted[voice] ? 'MUTED' : 'ON'}</b></button>)}</div>)}</div></section>}
       {mode === 'BUILDER' && <section className="mode-body"><h2>Паттерн <Waves size={20} /></h2><p>Выбери банк и касайся шагов, чтобы менять ритм на обеих деках.</p><div className="bank-row">{BANK_NAMES.map((name, bank) => <button key={name} className={decks[selected].bank === bank ? 'chosen' : ''} onClick={() => { e.setBank(selected, bank); refresh() }}>BANK {name}</button>)}</div><div className="deck-choice">{([0, 1] as DeckIndex[]).map(i => <button key={i} className={selected === i ? `chosen deck-${i}` : ''} onClick={() => setSelected(i)}>DECK {i === 0 ? 'A' : 'B'}</button>)}</div>{(['kick', 'hat', 'bass'] as Voice[]).map(voice => <div className="step-row" key={voice}><strong>{voiceNames[voice]}</strong><div>{pattern[voice].map((on, step) => <button key={step} aria-label={`${voiceNames[voice]}, шаг ${step + 1}`} aria-pressed={on} className={on ? `active deck-${selected}` : ''} onClick={() => { pattern[voice][step] = !on; refresh() }}>{(step % 4) + 1}</button>)}</div></div>)}<div className="project-actions"><button onClick={saveProject}><Save size={17} /> SAVE PROJECT</button><button onClick={() => projectInput.current?.click()}><Upload size={17} /> OPEN PROJECT</button></div></section>}
-      {mode === 'FX' && <section className="mode-body"><h2>Эффекты <Waves size={20} /></h2><p>Фильтр и эхо обрабатывают звук выбранной деки в реальном времени.</p><div className="mode-columns">{([0, 1] as DeckIndex[]).map(i => <div className={`control-card deck-${i}`} key={i}><h3>DECK {i === 0 ? 'A' : 'B'}</h3><Slider label="FILTER" value={decks[i].filter} onChange={v => { e.setFilter(i, v); refresh() }} deck={i} /><Slider label="ECHO" value={decks[i].echo} onChange={v => { e.setEcho(i, v); refresh() }} deck={i} /><button className="subtle" onClick={() => { e.setFilter(i, 1); e.setEcho(i, 0); refresh() }}><RotateCcw size={14} /> CLEAR FX</button></div>)}</div></section>}
+      {mode === 'FX' && <section className="mode-body"><h2>Эффекты <Waves size={20} /></h2><p>Фильтр и эхо обрабатывают звук выбранной деки в реальном времени.</p><div className="mode-columns">{([0, 1] as DeckIndex[]).map(i => <div className={`control-card deck-${i}`} key={i}><h3>DECK {i === 0 ? 'A' : 'B'}</h3><Slider label="FILTER" value={decks[i].filter} onChange={v => { e.setFilter(i, v); refresh() }} deck={i} /><Slider label="ECHO" value={decks[i].echo} onChange={v => { e.setEcho(i, v); refresh() }} deck={i} /><button className="subtle" onClick={() => { e.clearPreset(i); refresh() }}><RotateCcw size={14} /> CLEAR FX</button></div>)}</div></section>}
       {mode === 'AUTO' && <section className="mode-body"><h2>Pattern AutoMix <ArrowLeftRight size={20} /></h2><p>Автоматический кроссфейд между запущенными деками. Ручное движение фейдера сразу останавливает автоматизацию.</p><button className={`main-action ${auto ? 'live' : ''}`} onClick={toggleAuto}>{auto ? 'STOP AUTOMIX' : 'START AUTOMIX'}</button><div className="bank-row">{[4, 8, 16].map(bars => <button key={bars} className={bars === autoBars ? 'chosen' : ''} onClick={() => setAutoBars(bars)}>{bars} BARS</button>)}</div><p className="hint">При импорте треков скорость аудио не меняется; сведение выполняется только фейдером.</p></section>}
     </main>
 
-    <nav className="mode-tabs" aria-label="Режимы">{modes.map(item => <button key={item} className={mode === item ? 'selected' : ''} onClick={() => setMode(item)}>{item}</button>)}</nav>
+    <nav className="mode-tabs" aria-label="Режимы">{modes.map(item => <button key={item} className={mode === item ? 'selected' : ''} onClick={() => setMode(item)}>{item === 'PRESETS' ? 'ПРЕСЕТЫ' : item}</button>)}</nav>
     <footer className="transport"><div className="tempo"><div><strong>{decks[0].bpm.toFixed(1)}</strong><strong>{decks[1].bpm.toFixed(1)}</strong></div><div><span>BPM · {decks[0].kind === 'file' ? 'FILE' : 'PATTERN'}</span><span>CROSSFADE</span><span>BPM · {decks[1].kind === 'file' ? 'FILE' : 'PATTERN'}</span></div></div>
       <div className="utility-row"><button disabled={decks[0].kind !== 'pattern'} onClick={() => { e.setBpm(0, decks[1].bpm); refresh() }}>SYNC</button><button onClick={() => run(() => e.seek(0, decks[0].cues[0] ?? 0))} disabled={decks[0].kind !== 'file'}>CUE</button><button className={auto ? 'auto-active' : 'auto-button'} onClick={toggleAuto}><ArrowLeftRight size={17} /> AUTO</button><button onClick={() => run(() => e.seek(1, decks[1].cues[0] ?? 0))} disabled={decks[1].kind !== 'file'}>CUE</button><button disabled={decks[1].kind !== 'pattern'} onClick={() => { e.setBpm(1, decks[0].bpm); refresh() }}>SYNC</button></div>
       <div className="play-row"><button className="play-button deck-0" aria-label={decks[0].playing ? 'Пауза A' : 'Играть A'} onClick={() => run(() => decks[0].playing ? e.pause(0) : e.play(0))}>{decks[0].playing ? <Pause fill="currentColor" /> : <Play fill="currentColor" />}</button><span>A</span><input type="range" aria-label="Кроссфейдер" min="0" max="1" step="0.001" value={e.crossfade} onChange={ev => crossfade(Number(ev.target.value))} /><span>B</span><button className="play-button deck-1" aria-label={decks[1].playing ? 'Пауза B' : 'Играть B'} onClick={() => run(() => decks[1].playing ? e.pause(1) : e.play(1))}>{decks[1].playing ? <Pause fill="currentColor" /> : <Play fill="currentColor" />}</button></div>

@@ -1,3 +1,4 @@
+import { DJ_MATRIX, type PresetKey } from './presets'
 export type DeckIndex = 0 | 1
 export type Voice = 'kick' | 'hat' | 'bass'
 export type Pattern = Record<Voice, boolean[]>
@@ -8,6 +9,7 @@ export type DeckSnapshot = {
   playing: boolean
   position: number
   bpm: number
+  preset: PresetKey | null
   bank: number
   peaks: number[]
   cues: Array<number | null>
@@ -50,6 +52,7 @@ type DeckRuntime = {
   mid: BiquadFilterNode
   high: BiquadFilterNode
   filterNode: BiquadFilterNode
+  drive: WaveShaperNode
   delay: DelayNode
   feedback: GainNode
   wet: GainNode
@@ -62,11 +65,12 @@ export class MixEngine {
   private ticker: number | null = null
   private recorder: MediaRecorder | null = null
   private chunks: Blob[] = []
+  private hatBuffer: AudioBuffer | null = null
   crossfade = .5
   patterns = makePatterns()
   decks: [DeckSnapshot, DeckSnapshot] = [0, 1].map(i => ({
     title: i === 0 ? 'Night Circuit' : 'Retro Coast', kind: 'pattern', duration: 0,
-    playing: false, position: 0, bpm: 132, bank: 0,
+    playing: false, position: 0, bpm: 132, bank: 0, preset: null,
     peaks: demoPeaks(i), cues: Array(8).fill(null), loopBeats: 0,
     volume: .85, eq: [0, 0, 0], filter: 1, echo: 0,
     muted: { kick: false, hat: false, bass: false },
@@ -77,8 +81,12 @@ export class MixEngine {
       const ctx = new AudioContext()
       const output = ctx.createGain()
       const media = ctx.createMediaStreamDestination()
-      output.connect(ctx.destination)
-      output.connect(media)
+      const limiter = ctx.createDynamicsCompressor()
+      limiter.threshold.value = -6; limiter.knee.value = 6; limiter.ratio.value = 12
+      limiter.attack.value = .003; limiter.release.value = .15
+      output.connect(limiter)
+      limiter.connect(ctx.destination)
+      limiter.connect(media)
       this.context = ctx
       this.media = media
       this.runtime = [0, 1].map(() => {
@@ -87,16 +95,23 @@ export class MixEngine {
         const mid = ctx.createBiquadFilter(); mid.type = 'peaking'; mid.frequency.value = 1000; mid.Q.value = .7
         const high = ctx.createBiquadFilter(); high.type = 'highshelf'; high.frequency.value = 4000
         const filterNode = ctx.createBiquadFilter(); filterNode.type = 'lowpass'; filterNode.frequency.value = 20000
+        const drive = ctx.createWaveShaper(); drive.oversample = '2x'
         const delay = ctx.createDelay(1); delay.delayTime.value = .28
         const feedback = ctx.createGain(); feedback.gain.value = .25
         const wet = ctx.createGain(); wet.gain.value = 0
-        gain.connect(low).connect(mid).connect(high).connect(filterNode).connect(output)
-        filterNode.connect(delay).connect(wet).connect(output)
+        gain.connect(low).connect(mid).connect(high).connect(filterNode).connect(drive).connect(output)
+        drive.connect(delay).connect(wet).connect(output)
         delay.connect(feedback).connect(delay)
         return { buffer: null, source: null, offset: 0, startedAt: 0, nextStepAt: 0,
-          step: 0, gain, low, mid, high, filterNode, delay, feedback, wet }
+          step: 0, gain, low, mid, high, filterNode, drive, delay, feedback, wet }
       }) as [DeckRuntime, DeckRuntime]
       this.setCrossfade(this.crossfade)
+      this.decks.forEach((d, i) => {
+        const deck = i as DeckIndex
+        this.setEq(deck, 0, d.eq[0]); this.setEq(deck, 1, d.eq[1]); this.setEq(deck, 2, d.eq[2])
+        this.configurePreset(deck)
+        this.setFilter(deck, d.filter); this.setEcho(deck, d.echo)
+      })
     }
     if (this.context.state !== 'running') await this.context.resume()
   }
@@ -122,6 +137,35 @@ export class MixEngine {
   setEcho(deck: DeckIndex, value: number) {
     this.decks[deck].echo = value
     this.runtime?.[deck].wet.gain.setTargetAtTime(value * .55, this.context!.currentTime, .02)
+  }
+  applyPreset(deck: DeckIndex, key: PresetKey) {
+    const preset = DJ_MATRIX[key]
+    this.decks[deck].preset = key
+    this.decks[deck].filter = Math.log(preset.cutoff / 120) / Math.log(20000 / 120)
+    this.decks[deck].echo = .25
+    this.configurePreset(deck)
+    this.setFilter(deck, this.decks[deck].filter); this.setEcho(deck, .25)
+  }
+  clearPreset(deck: DeckIndex) {
+    this.decks[deck].preset = null; this.configurePreset(deck)
+    this.setFilter(deck, 1); this.setEcho(deck, 0)
+  }
+  private configurePreset(deck: DeckIndex) {
+    const r = this.runtime?.[deck], ctx = this.context
+    if (!r || !ctx) return
+    const key = this.decks[deck].preset, preset = key ? DJ_MATRIX[key] : null
+    r.filterNode.type = preset?.filterType ?? 'lowpass'
+    r.filterNode.Q.setTargetAtTime(preset?.resonance ?? 1, ctx.currentTime, .02)
+    r.delay.delayTime.setTargetAtTime(preset?.delayTime ?? .28, ctx.currentTime, .02)
+    r.feedback.gain.setTargetAtTime(preset?.feedback ?? .25, ctx.currentTime, .02)
+    if (preset) {
+      const amount = 1 + preset.drive / 150, curve = new Float32Array(2048)
+      for (let i = 0; i < curve.length; i++) {
+        const x = i * 2 / (curve.length - 1) - 1
+        curve[i] = Math.tanh(x * amount) / Math.tanh(amount)
+      }
+      r.drive.curve = curve
+    } else r.drive.curve = null
   }
   setBank(deck: DeckIndex, bank: number) { this.decks[deck].bank = Math.max(0, Math.min(3, bank)) }
   setBpm(deck: DeckIndex, bpm: number) { this.decks[deck].bpm = Math.max(60, Math.min(200, bpm)) }
@@ -231,6 +275,7 @@ export class MixEngine {
         const d = this.decks[i]
         if (!d.playing || d.kind !== 'pattern') return
         active = true
+        if (r.nextStepAt < ctx.currentTime - .12) r.nextStepAt = ctx.currentTime
         while (r.nextStepAt < ctx.currentTime + .12) {
           const step = r.step % 16
           const pattern = this.patterns[d.bank]
@@ -250,9 +295,13 @@ export class MixEngine {
     osc.connect(amp).connect(r.gain); osc.start(at); osc.stop(at + .26)
   }
   private hat(r: DeckRuntime, at: number) {
-    const ctx = this.context!, buffer = ctx.createBuffer(1, Math.floor(ctx.sampleRate * .07), ctx.sampleRate)
-    const data = buffer.getChannelData(0)
-    for (let i = 0; i < data.length; i++) data[i] = Math.random() * 2 - 1
+    const ctx = this.context!
+    if (!this.hatBuffer) {
+      this.hatBuffer = ctx.createBuffer(1, Math.floor(ctx.sampleRate * .07), ctx.sampleRate)
+      const data = this.hatBuffer.getChannelData(0)
+      for (let i = 0; i < data.length; i++) data[i] = Math.random() * 2 - 1
+    }
+    const buffer = this.hatBuffer
     const src = ctx.createBufferSource(), filter = ctx.createBiquadFilter(), amp = ctx.createGain()
     src.buffer = buffer; filter.type = 'highpass'; filter.frequency.value = 6000
     amp.gain.setValueAtTime(.16, at); amp.gain.exponentialRampToValueAtTime(.001, at + .065)
