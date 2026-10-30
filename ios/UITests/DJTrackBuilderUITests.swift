@@ -62,6 +62,9 @@ final class DJTrackBuilderUITests: XCTestCase {
         XCUIDevice.shared.orientation = .landscapeLeft
         defer { XCUIDevice.shared.orientation = .portrait }
         XCTAssertTrue(app.buttons["Play Deck A"].waitForExistence(timeout: 10))
+        let landscape = NSPredicate { _, _ in self.app.frame.width > self.app.frame.height }
+        expectation(for: landscape, evaluatedWith: app)
+        waitForExpectations(timeout: 10)
         XCTAssertTrue(app.buttons["Play Deck A"].isHittable)
         XCTAssertTrue(app.buttons["Play Deck B"].isHittable)
         XCTAssertTrue(app.sliders["Crossfader: A to B"].isHittable)
