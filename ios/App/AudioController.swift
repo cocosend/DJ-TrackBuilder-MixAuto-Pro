@@ -667,7 +667,13 @@ final class AudioController: ObservableObject {
         scratchTarget[deck] = position
         if scratchEngaged[deck] {
             scratch.target(min(scratchBounds[deck].1, max(scratchBounds[deck].0, position)))
-            return
+            // Refill ahead of the window edge while the old clip stays audible.
+            let lower = scratchBounds[deck].0 + 0.7
+            let upper = scratchBounds[deck].1 - 0.7
+            let canShiftLeft = position < lower && scratchBounds[deck].0 > 0
+            let canShiftRight = position > upper &&
+                scratchBounds[deck].1 < Double(file.length)/file.processingFormat.sampleRate - 0.01
+            if (!canShiftLeft && !canShiftRight) || scratchPending[deck] { return }
         }
         guard !scratchPending[deck] else { return }
         scratchPending[deck] = true
@@ -683,10 +689,15 @@ final class AudioController: ObservableObject {
                       self.scratchGeneration[deck] == generation,
                       self.fileDecks[deck]?.fileName == meta.fileName,
                       self.deckPlaying[deck], self.audioEngine.isRunning else { return }
-                guard scratch.load(clip.buffer, at: clip.start) else { return }
+                guard scratch.load(clip.buffer, at: clip.start) else {
+                    self.scratchPending[deck] = false
+                    return
+                }
                 self.scratchBounds[deck] = (clip.start, clip.end)
-                self.filePausedFrame[deck] = self.currentFrame(deck)
-                self.filePlayers[deck].pause()
+                if !self.scratchEngaged[deck] {
+                    self.filePausedFrame[deck] = self.currentFrame(deck)
+                    self.filePlayers[deck].pause()
+                }
                 scratch.target(min(clip.end, max(clip.start, self.scratchTarget[deck])))
                 scratch.active(true)
                 self.scratchEngaged[deck] = true
