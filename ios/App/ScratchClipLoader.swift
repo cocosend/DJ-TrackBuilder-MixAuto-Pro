@@ -12,6 +12,16 @@ final class PreparedScratchClip: @unchecked Sendable {
 /// Decode a bounded stereo window outside the real-time callback. The source
 /// stays in the app's imported-audio store; no full-track memory load.
 enum ScratchClipLoader {
+    static func staysAhead(position: Double, start: Double, end: Double,
+                           duration: Double, margin: Double = 2) -> Bool {
+        guard position.isFinite, start.isFinite, end.isFinite, duration.isFinite,
+              margin.isFinite, duration > 0, margin >= 0,
+              start >= 0, end > start, end <= duration + 0.01 else { return false }
+        let leftReady = position >= start + margin || start < 0.01
+        let rightReady = position <= end - margin || end >= duration - 0.01
+        return leftReady && rightReady
+    }
+
     static func prepare(url: URL, near seconds: Double, outputRate: Double) throws
         -> PreparedScratchClip {
         let reader = try AVAudioFile(forReading: url,

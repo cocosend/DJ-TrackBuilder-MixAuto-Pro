@@ -176,6 +176,10 @@ final class AudioController: ObservableObject {
     private var scratchPending = [false, false]
     private var scratchTarget = [0.0, 0.0]
     private var scratchBounds = [(0.0,0.0),(0.0,0.0)]
+    private var scratchCache: [PreparedScratchClip?] = [nil, nil]
+    private var scratchCacheFile: [String?] = [nil, nil]
+    private var scratchPrefetchTasks: [Task<Void, Never>?] = [nil, nil]
+    private var scratchPrefetchGeneration: [UInt64] = [0, 0]
     private let fileEqualizers = [AVAudioUnitEQ(numberOfBands: 4), AVAudioUnitEQ(numberOfBands: 4)]
     private let fileDelays = [AVAudioUnitDelay(), AVAudioUnitDelay()]
     private var fileAudio: [AVAudioFile?] = [nil, nil]
@@ -242,6 +246,7 @@ final class AudioController: ObservableObject {
         saveTask?.cancel()
         importTask?.cancel()
         for task in scratchTasks { task?.cancel() }
+        for task in scratchPrefetchTasks { task?.cancel() }
         timedBlendTask?.cancel()
         beatHintTask?.cancel()
         waveformTask?.cancel()
@@ -401,6 +406,7 @@ final class AudioController: ObservableObject {
             playing = true
             errorMessage = nil
             updateFileVolumes()
+            if fileAudio[deck] != nil { primeScratchWindow(deck) }
         } catch {
             errorMessage = "Deck \(deck == 0 ? "A" : "B"): \(error.localizedDescription)"
         }
@@ -676,6 +682,19 @@ final class AudioController: ObservableObject {
             if (!canShiftLeft && !canShiftRight) || scratchPending[deck] { return }
         }
         guard !scratchPending[deck] else { return }
+        if !scratchEngaged[deck], let cached = scratchCache[deck],
+           scratchCacheFile[deck] == meta.fileName,
+           position >= cached.start, position < cached.end - 0.01,
+           cached.buffer.format.sampleRate == audioSampleRate,
+           scratch.load(cached.buffer, at: cached.start) {
+            scratchBounds[deck] = (cached.start, cached.end)
+            filePausedFrame[deck] = currentFrame(deck)
+            filePlayers[deck].pause()
+            scratch.target(position)
+            scratch.active(true)
+            scratchEngaged[deck] = true
+            return
+        }
         scratchPending[deck] = true
         scratchGeneration[deck] &+= 1
         let generation = scratchGeneration[deck]
@@ -727,6 +746,54 @@ final class AudioController: ObservableObject {
         scratchEngaged[deck] = false
         scratchBridges[deck]?.active(false)
         scratchBridges[deck]?.reap()
+    }
+
+    /// Keep one bounded PCM window close to the playing needle so the first
+    /// touch can enter C++ scratch immediately. Decode never runs on the UI or
+    /// the audio rendering thread. Refill only after moving clear of its center.
+    private func primeScratchWindow(_ deck: Int) {
+        guard (0..<2).contains(deck), deckPlaying[deck],
+              !scratchEngaged[deck], !scratchPending[deck],
+              scratchPrefetchTasks[deck] == nil,
+              let file = fileAudio[deck], file.length >= 32,
+              let meta = fileDecks[deck],
+              let url = ImportedAudioStore.fileURL(for: meta),
+              audioSampleRate > 0 else { return }
+        let position = Double(currentFrame(deck))/file.processingFormat.sampleRate
+        if let clip = scratchCache[deck], scratchCacheFile[deck] == meta.fileName,
+           clip.buffer.format.sampleRate == audioSampleRate {
+            let duration = Double(file.length)/file.processingFormat.sampleRate
+            if ScratchClipLoader.staysAhead(position: position, start: clip.start,
+                                          end: clip.end, duration: duration) { return }
+        }
+        scratchPrefetchGeneration[deck] &+= 1
+        let generation = scratchPrefetchGeneration[deck]
+        let rate = audioSampleRate
+        scratchPrefetchTasks[deck] = Task { [weak self] in
+            do {
+                let clip = try await BackgroundWork.run(priority: .utility) {
+                    try ScratchClipLoader.prepare(url: url, near: position, outputRate: rate)
+                }
+                guard let self, !Task.isCancelled,
+                      self.scratchPrefetchGeneration[deck] == generation,
+                      self.fileDecks[deck]?.fileName == meta.fileName,
+                      self.audioSampleRate == rate else { return }
+                self.scratchCache[deck] = clip
+                self.scratchCacheFile[deck] = meta.fileName
+                self.scratchPrefetchTasks[deck] = nil
+            } catch {
+                guard let self, self.scratchPrefetchGeneration[deck] == generation else { return }
+                self.scratchPrefetchTasks[deck] = nil
+            }
+        }
+    }
+
+    private func clearScratchCache(_ deck: Int) {
+        scratchPrefetchGeneration[deck] &+= 1
+        scratchPrefetchTasks[deck]?.cancel()
+        scratchPrefetchTasks[deck] = nil
+        scratchCache[deck] = nil
+        scratchCacheFile[deck] = nil
     }
 
     /// Set/delete/jump actual file hot cues without touching other deck.
@@ -902,6 +969,7 @@ final class AudioController: ObservableObject {
         cancelBeatHintBlend()
         guard (0..<2).contains(deck), importingDeck == nil else { return }
         abortScratch(deck)
+        clearScratchCache(deck)
         loopGeneration[deck] &+= 1
         fileLoopTasks[deck]?.cancel()
         importGeneration[deck] &+= 1
@@ -1006,6 +1074,7 @@ final class AudioController: ObservableObject {
         cancelBeatHintBlend()
         guard (0..<2).contains(deck) else { return }
         abortScratch(deck)
+        clearScratchCache(deck)
         // A user switch beats an unfinished import. Its detached file copy
         // may finish later, but it can no longer install audio/metadata.
         importGeneration[deck] &+= 1
@@ -1391,6 +1460,9 @@ final class AudioController: ObservableObject {
     func refreshRealtimeStatus() {
         for scratch in scratchBridges { scratch?.reap() }
         guard let bridge else { return }
+        for deck in 0..<2 where deckPlaying[deck] && fileAudio[deck] != nil {
+            primeScratchWindow(deck)
+        }
         let phase = bridge.autoMixState()
         if !timedBlendActive {
             let effective = Double(bridge.effectiveCrossfader())
@@ -1538,6 +1610,7 @@ final class AudioController: ObservableObject {
         bridge?.setPlaying(false)
         for deck in 0..<2 {
             abortScratch(deck)
+            clearScratchCache(deck)
             loopGeneration[deck] &+= 1
             fileLoopTasks[deck]?.cancel()
             fileLoopTasks[deck] = nil

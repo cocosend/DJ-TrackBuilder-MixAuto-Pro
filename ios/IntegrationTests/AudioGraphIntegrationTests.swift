@@ -191,4 +191,22 @@ final class AudioGraphIntegrationTests: XCTestCase {
         let otherOnly = try render(engine, seconds: 0.3)
         XCTAssertGreaterThan(otherOnly, 0.05, "Other deck must survive scratch release")
     }
+
+    func testScratchWindowPrefetchCoversShortTracksAndRefillsLongTracks() throws {
+        XCTAssertTrue(ScratchClipLoader.staysAhead(position: 0, start: 0, end: 8,
+                                                   duration: 300))
+        XCTAssertTrue(ScratchClipLoader.staysAhead(position: 7, start: 0, end: 8,
+                                                   duration: 8))
+        XCTAssertFalse(ScratchClipLoader.staysAhead(position: 7, start: 0, end: 8,
+                                                    duration: 300))
+        let tone = try fileWithTone(440, duration: 1.5)
+        defer { try? FileManager.default.removeItem(at: tone) }
+        let window = try ScratchClipLoader.prepare(url: tone, near: 0.5,
+                                                   outputRate: sampleRate)
+        XCTAssertEqual(window.start, 0, accuracy: 1.0 / sampleRate)
+        XCTAssertEqual(window.end, 1.5, accuracy: 1.0 / sampleRate)
+        XCTAssertEqual(window.buffer.frameLength, 72_000)
+        XCTAssertTrue(ScratchClipLoader.staysAhead(position: 0.7, start: window.start,
+                end: window.end, duration: 1.5))
+    }
 }
