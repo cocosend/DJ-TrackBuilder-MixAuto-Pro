@@ -2,8 +2,8 @@ import SwiftUI
 import Combine
 import UniformTypeIdentifiers
 
-// Original approved Canva: Spectral Cockpit, first nine-slide design.
-// Palette and placement remain fixed; no alternative redesign introduced.
+// FLOW direction: measured PCM envelopes, spectral color, and a persistent
+// two-deck transport. Color describes band energy, never separated stems.
 private enum Spectral {
     static let bg = Color(red: 17/255, green: 18/255, blue: 20/255)
     static let panel = Color(red: 24/255, green: 26/255, blue: 29/255)
@@ -25,7 +25,7 @@ private enum Spectral {
 }
 
 private enum ConsoleMode: String, CaseIterable, Identifiable {
-    case wave = "WAVE"
+    case wave = "FLOW"
     case mix = "MIX"
     case stems = "STEMS"
     case builder = "BUILDER"
@@ -198,6 +198,23 @@ struct ConsoleView: View {
 
     private var waveScreen: some View {
         VStack(spacing: 0) {
+            HStack(spacing: 8) {
+                Text("FLOW")
+                    .font(.system(size: 11, weight: .black, design: .monospaced))
+                    .foregroundStyle(Spectral.ink)
+                Text("LIVE SIGNAL")
+                    .font(.system(size: 9, weight: .bold, design: .monospaced))
+                    .foregroundStyle(Spectral.muted)
+                Spacer()
+                HStack(spacing: 3) {
+                    ForEach(0..<Spectral.spectrum.count, id: \.self) { band in
+                        Capsule().fill(Spectral.spectrum[band]).frame(width: 13, height: 3)
+                    }
+                }
+                .accessibilityHidden(true)
+            }
+            .padding(.horizontal, 13)
+            .padding(.top, 9)
             HStack(spacing: 6) {
                 ForEach(0..<2, id: \.self) { deck in
                     HStack(spacing: 6) {
@@ -213,7 +230,7 @@ struct ConsoleView: View {
                 }
             }
             .padding(.horizontal, 10)
-            .padding(.vertical, 9)
+            .padding(.vertical, 8)
             HStack(spacing: 1) {
                 ForEach(0..<2, id: \.self) { deck in
                     TimelineView(.animation(minimumInterval: 1.0 / 60.0, paused: !audio.deckPlaying[deck])) { _ in
@@ -1048,7 +1065,7 @@ private struct VerticalWaveform: View {
                         }
                     }
                     for (index, path) in groups.enumerated() {
-                        context.stroke(path, with: .color(accent.opacity(1.0 - Double(index) * 0.12)),
+                        context.stroke(path, with: .color(Spectral.spectrum[index].opacity(0.96)),
                                        lineWidth: max(1.0, stepHeight * 0.72))
                     }
                     // No imaginary bar lines for loaded files. If the
