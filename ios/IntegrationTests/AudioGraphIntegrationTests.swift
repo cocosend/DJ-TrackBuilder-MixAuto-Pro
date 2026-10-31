@@ -1,5 +1,6 @@
 import XCTest
 import AVFAudio
+@testable import DJTrackBuilderMixAutoPro
 
 /// Executed by Xcode on Apple's actual AVAudioEngine implementation, not a
 /// Linux mock. It proves a two-file/EQ/delay offline signal path in Simulator;
