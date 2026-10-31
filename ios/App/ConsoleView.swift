@@ -525,18 +525,8 @@ struct ConsoleView: View {
 
     private func controlSlider(deck: Int, title: String, value: Binding<Double>,
                                range: ClosedRange<Double>) -> some View {
-        VStack(alignment: .leading, spacing: 5) {
-            HStack {
-                Text(title).foregroundStyle(Spectral.muted)
-                Spacer()
-                Text(String(format: "%+.1f", value.wrappedValue))
-                    .foregroundStyle(accent(deck))
-            }
-            .font(.system(size: 10, weight: .bold, design: .monospaced))
-            Slider(value: value, in: range)
-                .tint(accent(deck))
-                .accessibilityLabel("Deck \(deckName(deck)) \(title)")
-        }
+        MixerDial(title: title, value: value, range: range, color: accent(deck))
+            .accessibilityLabel("Deck \(deckName(deck)) \(title)")
     }
 
     private var builderScreen: some View {
@@ -1004,6 +994,71 @@ private struct MiniWaveform: View {
             context.stroke(bars, with: .color(color), lineWidth: max(0.8, w * 0.55))
         }
         .accessibilityLabel("Audio waveform overview")
+    }
+}
+
+/// A compact touch dial for the existing, real mixer parameters. Drag up/down
+/// for fine control; VoiceOver can adjust the same binding independently.
+private struct MixerDial: View {
+    let title: String
+    @Binding var value: Double
+    let range: ClosedRange<Double>
+    let color: Color
+    @State private var dragStart: Double?
+
+    private var fraction: Double {
+        min(1, max(0, (value - range.lowerBound) / (range.upperBound - range.lowerBound)))
+    }
+
+    var body: some View {
+        HStack(spacing: 9) {
+            ZStack {
+                Circle().fill(Spectral.bg)
+                Circle().stroke(Spectral.rule, lineWidth: 4).padding(5)
+                Circle()
+                    .trim(from: 0, to: max(0.001, fraction))
+                    .stroke(color, style: StrokeStyle(lineWidth: 4, lineCap: .round))
+                    .rotationEffect(.degrees(-90))
+                    .padding(5)
+                Capsule()
+                    .fill(color)
+                    .frame(width: 3, height: 14)
+                    .offset(y: -13)
+                    .rotationEffect(.degrees(fraction * 270 - 135))
+            }
+            .frame(width: 54, height: 54)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title)
+                    .foregroundStyle(Spectral.muted)
+                Text(String(format: title == "FILTER" || title == "GAIN" ? "%.0f%%" : "%+.1f",
+                            title == "FILTER" || title == "GAIN" ? value * 100 : value))
+                    .foregroundStyle(color)
+                    .monospacedDigit()
+            }
+            .font(.system(size: 10, weight: .bold, design: .monospaced))
+            Spacer(minLength: 0)
+        }
+        .frame(maxWidth: .infinity, minHeight: 58, alignment: .leading)
+        .contentShape(Rectangle())
+        .gesture(DragGesture(minimumDistance: 0)
+            .onChanged { gesture in
+                let start = dragStart ?? value
+                if dragStart == nil { dragStart = start }
+                let delta = Double(gesture.translation.height) / 180
+                let next = start - delta * (range.upperBound - range.lowerBound)
+                value = min(range.upperBound, max(range.lowerBound, next))
+            }
+            .onEnded { _ in dragStart = nil })
+        .accessibilityElement(children: .ignore)
+        .accessibilityValue(String(format: "%.1f", value))
+        .accessibilityAdjustableAction { direction in
+            let step = (range.upperBound - range.lowerBound) / 20
+            switch direction {
+            case .increment: value = min(range.upperBound, value + step)
+            case .decrement: value = max(range.lowerBound, value - step)
+            @unknown default: break
+            }
+        }
     }
 }
 
