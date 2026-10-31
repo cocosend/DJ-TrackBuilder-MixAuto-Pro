@@ -32,7 +32,7 @@ final class DJTrackBuilderUITests: XCTestCase {
     }
 
     func testAllFiveModesAndAutoScreenNavigate() throws {
-        let modes = ["MIX", "STEMS", "BUILDER", "FX", "WAVE"]
+        let modes = ["MIX", "STEMS", "BUILDER", "FX", "FLOW"]
         for mode in modes {
             let button = app.buttons[mode]
             XCTAssertTrue(button.exists, "Missing navigation mode: \(mode)")
