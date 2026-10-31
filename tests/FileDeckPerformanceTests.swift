@@ -35,6 +35,43 @@ import Foundation
                                                   length: 48000 * 12) == nil)
         precondition(FileDeckPerformance.seekFrame(seconds: .infinity, sampleRate: 48000,
                                                   length: 48000 * 12) == nil)
+        // Last-frame and normalized seeks never fall outside the file or take
+        // a second lossy conversion through seconds.
+        for rate in [44_100, 48_000, 96_000] {
+            let length = Int64(rate * 123)
+            for frame in [Int64(1), 7, 441, length / 2, length - 1] {
+                let progress = (Double(frame) + 0.25) / Double(length)
+                precondition(FileDeckPerformance.seekFrame(progress: progress, length: length) == frame)
+            }
+            precondition(FileDeckPerformance.seekFrame(progress: 1, length: length) == length - 1)
+            precondition(FileDeckPerformance.seekFrame(progress: -1, length: length) == 0)
+        }
+        precondition(FileDeckPerformance.seekFrame(progress: .nan, length: 100) == nil)
+        precondition(FileDeckPerformance.seekFrame(progress: 0, length: 0) == nil)
+        precondition(FileDeckPerformance.seekFrame(progress: 1, length: Int64.max) == Int64.max - 1)
+
+        // A converted loop may have a fractional source-to-output frame ratio.
+        // Even after many cycles its source position must return to loop-in.
+        let sourceFrames: Int64 = 88_201
+        let outputFrames: Int64 = 96_001
+        for cycles in [Int64(0), 1, 10, 1_000_000] {
+            let atStart = FileDeckPerformance.loopFrame(sampleTime: cycles * outputFrames,
+                playerRate: 48_000, bufferRate: 48_000, bufferFrames: outputFrames,
+                sourceStart: 220_500, sourceFrames: sourceFrames)
+            precondition(atStart == 220_500, "Converted loop clock must not drift")
+            let halfway = FileDeckPerformance.loopFrame(sampleTime: cycles * outputFrames + 48_000,
+                playerRate: 48_000, bufferRate: 48_000, bufferFrames: outputFrames,
+                sourceStart: 220_500, sourceFrames: sourceFrames)
+            precondition(abs(halfway - (220_500 + sourceFrames / 2)) <= 1)
+        }
+        precondition(FileDeckPerformance.loopFrame(sampleTime: -10, playerRate: 48_000,
+            bufferRate: 48_000, bufferFrames: 100, sourceStart: 55, sourceFrames: 100) == 55)
+        for duration in [30.0, 240.0, 3600.0] {
+            let span = FileDeckPerformance.waveformSpan(duration: duration, zoom: 2)
+            precondition(abs(span * duration - 4) < 0.000001,
+                         "Touch sensitivity must not depend on track duration")
+        }
+        precondition(FileDeckPerformance.waveformSpan(duration: 2, zoom: 1) == 1)
         let roundTrip = try JSONDecoder().decode(ImportedAudio.self,
                                 from: JSONEncoder().encode(current))
         precondition(current == roundTrip)

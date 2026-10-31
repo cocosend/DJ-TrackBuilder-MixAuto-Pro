@@ -374,9 +374,12 @@ final class AudioController: ObservableObject {
         let base = fileStartFrame[deck]
         let elapsed = max(0, Double(playerTime.sampleTime) *
                          file.processingFormat.sampleRate / playerTime.sampleRate)
-        if loopingDeck[deck] && fileLoopLength[deck] > 0 {
-            let within = AVAudioFramePosition(elapsed) % fileLoopLength[deck]
-            return min(file.length - 1, fileLoopStart[deck] + within)
+        if loopingDeck[deck], let buffer = fileLoopBuffer[deck], fileLoopLength[deck] > 0 {
+            let frame = FileDeckPerformance.loopFrame(sampleTime: playerTime.sampleTime,
+                playerRate: playerTime.sampleRate, bufferRate: buffer.format.sampleRate,
+                bufferFrames: Int64(buffer.frameLength), sourceStart: fileLoopStart[deck],
+                sourceFrames: fileLoopLength[deck])
+            return min(file.length - 1, frame)
         }
         return min(file.length - 1, base + AVAudioFramePosition(elapsed))
     }
@@ -567,14 +570,20 @@ final class AudioController: ObservableObject {
     /// Audio-file seek is an actual player-node reschedule, not a UI simulation.
     /// No other deck or the pattern clock is reset.
     func seekDeck(_ deck: Int, to seconds: Double) {
-        cancelBeatHintBlend()
-        if (0..<2).contains(deck) { loopGeneration[deck] &+= 1; fileLoopTasks[deck]?.cancel() }
         guard (0..<2).contains(deck), let file = fileAudio[deck],
               let frame = FileDeckPerformance.seekFrame(seconds: seconds,
                 sampleRate: file.processingFormat.sampleRate, length: file.length) else {
             errorMessage = "Seek position is outside the loaded track."
             return
         }
+        seekDeck(deck, file: file, frame: frame)
+    }
+
+    private func seekDeck(_ deck: Int, file: AVAudioFile, frame: AVAudioFramePosition) {
+        cancelBeatHintBlend()
+        cancelTimedBlend()
+        loopGeneration[deck] &+= 1
+        fileLoopTasks[deck]?.cancel()
         let wasPlaying = deckPlaying[deck]
         fileGeneration[deck] &+= 1
         filePlayers[deck].stop()
@@ -585,11 +594,10 @@ final class AudioController: ObservableObject {
     }
 
     func seekDeck(_ deck: Int, normalized progress: Double) {
-        guard (0..<2).contains(deck), let file = fileAudio[deck], file.length > 0,
-              progress.isFinite else { return }
-        let frame = min(file.length - 1,
-                        AVAudioFramePosition(max(0, min(1, progress)) * Double(file.length)))
-        seekDeck(deck, to: Double(frame) / file.processingFormat.sampleRate)
+        guard (0..<2).contains(deck), let file = fileAudio[deck],
+              let frame = FileDeckPerformance.seekFrame(progress: progress, length: file.length)
+        else { return }
+        seekDeck(deck, file: file, frame: frame)
     }
 
     /// Set/delete/jump actual file hot cues without touching other deck.
@@ -629,6 +637,7 @@ final class AudioController: ObservableObject {
 
     private func pauseDeck(_ deck: Int) {
         cancelBeatHintBlend()
+        cancelTimedBlend()
         guard (0..<2).contains(deck) else { return }
         if fileAudio[deck] != nil { filePausedFrame[deck] = currentFrame(deck) }
         deckPlaying[deck] = false
@@ -639,6 +648,7 @@ final class AudioController: ObservableObject {
 
     private func pauseAllDecks() {
         cancelBeatHintBlend()
+        cancelTimedBlend()
         for deck in 0..<2 {
             if fileAudio[deck] != nil { filePausedFrame[deck] = currentFrame(deck) }
             deckPlaying[deck] = false
@@ -658,6 +668,7 @@ final class AudioController: ObservableObject {
     /// CUE returns a file deck to the start while preserving the other deck.
     func cueDeck(_ deck: Int) {
         cancelBeatHintBlend()
+        cancelTimedBlend()
         if (0..<2).contains(deck) { loopGeneration[deck] &+= 1; fileLoopTasks[deck]?.cancel() }
         guard (0..<2).contains(deck), let file = fileAudio[deck] else { return }
         // Pauses one deck and reschedules from its first PCM frame.

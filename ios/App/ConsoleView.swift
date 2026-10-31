@@ -221,8 +221,26 @@ struct ConsoleView: View {
                         Text(deckName(deck))
                             .font(.system(size: 10, weight: .heavy, design: .monospaced))
                             .foregroundStyle(accent(deck))
-                        MiniWaveform(peaks: audio.waveforms[deck].peaks, color: accent(deck))
-                            .frame(height: 22)
+                        GeometryReader { overview in
+                            ZStack {
+                                MiniWaveform(peaks: audio.waveforms[deck].overview, color: accent(deck))
+                                TimelineView(.animation(minimumInterval: 1.0 / 30.0,
+                                    paused: !audio.deckPlaying[deck])) { _ in
+                                    Rectangle().fill(Spectral.ink).frame(width: 2)
+                                        .position(x: overview.size.width * audio.deckProgress(deck),
+                                                  y: overview.size.height / 2)
+                                }
+                            }
+                            .contentShape(Rectangle())
+                            .gesture(DragGesture(minimumDistance: 0).onEnded { gesture in
+                                guard overview.size.width > 0, audio.fileDecks[deck] != nil else { return }
+                                audio.seekDeck(deck, normalized: Double(gesture.location.x / overview.size.width))
+                            })
+                            .accessibilityElement(children: .ignore)
+                            .accessibilityLabel("Deck \(deckName(deck)) track overview")
+                            .accessibilityHint("Drag to jump through the loaded track")
+                        }
+                        .frame(height: 32)
                         Text(audio.fileDecks[deck] == nil ? "BAR 1–4" : "FULL")
                             .font(.system(size: 8, weight: .bold, design: .monospaced))
                             .foregroundStyle(Spectral.muted)
@@ -244,6 +262,7 @@ struct ConsoleView: View {
                             duration: audio.fileDecks[deck]?.duration,
                             zoom: waveformZoom,
                             onSeek: { audio.seekDeck(deck, normalized: $0) })
+                            .id(audio.fileDecks[deck]?.fileName ?? "pattern-\(deck)")
                     }
                 }
             }
@@ -1005,7 +1024,7 @@ private struct MixerDial: View {
     @Binding var value: Double
     let range: ClosedRange<Double>
     let color: Color
-    @State private var dragStart: Double?
+    @GestureState private var dragStart: Double? = nil
 
     private var fraction: Double {
         min(1, max(0, (value - range.lowerBound) / (range.upperBound - range.lowerBound)))
@@ -1042,14 +1061,15 @@ private struct MixerDial: View {
         .frame(maxWidth: .infinity, minHeight: 58, alignment: .leading)
         .contentShape(Rectangle())
         .gesture(DragGesture(minimumDistance: 0)
+            .updating($dragStart) { _, start, _ in
+                if start == nil { start = value }
+            }
             .onChanged { gesture in
                 let start = dragStart ?? value
-                if dragStart == nil { dragStart = start }
                 let delta = Double(gesture.translation.height) / 180
                 let next = start - delta * (range.upperBound - range.lowerBound)
                 value = min(range.upperBound, max(range.lowerBound, next))
-            }
-            .onEnded { _ in dragStart = nil })
+            })
         .accessibilityElement(children: .ignore)
         .accessibilityValue(String(format: "%.1f", value))
         .accessibilityAdjustableAction { direction in
@@ -1078,13 +1098,17 @@ private struct VerticalWaveform: View {
     let duration: Double?
     let zoom: Double
     let onSeek: (Double) -> Void
-    @State private var scrubOrigin: Double?
-    @State private var scrubPreview: Double?
+    private struct Scrub {
+        let origin: Double
+        let span: Double
+        var preview: Double
+    }
+    @GestureState private var scrub: Scrub? = nil
 
     var body: some View {
         GeometryReader { proxy in
-            let displayedProgress = scrubPreview ?? progress
-            let visibleSpan = (isFile ? 0.14 : 0.30) / max(1, zoom)
+            let displayedProgress = scrub?.preview ?? progress
+            let visibleSpan = FileDeckPerformance.waveformSpan(duration: isFile ? duration : nil, zoom: zoom)
             ZStack {
                 Spectral.bg
                 Canvas { context, size in
@@ -1100,7 +1124,9 @@ private struct VerticalWaveform: View {
                         // appears. No decorative amplitude-index color mapping.
                         let relative = (Double(i) / Double(lines) - 0.5) * span
                         let location = displayedProgress + relative
-                        let wrapped = isFile ? min(1, max(0, location)) :
+                        // Beyond the file boundaries there is no audio to draw.
+                        if isFile && !(0...1).contains(location) { continue }
+                        let wrapped = isFile ? location :
                             (location - floor(location))
                         let preciseBin = wrapped * Double(max(0, n - 1))
                         let bin = min(n - 1, max(0, Int(preciseBin)))
@@ -1191,7 +1217,7 @@ private struct VerticalWaveform: View {
                             .foregroundStyle(isActive ? accent : Spectral.muted)
                     }
                     Spacer()
-                    Text(scrubPreview != nil ? "RELEASE TO SEEK" : isFile ? (beatGrid == nil ? "FILE · GRID UNAVAILABLE" :
+                    Text(scrub != nil ? "RELEASE TO SEEK" : isFile ? (beatGrid == nil ? "FILE · GRID UNAVAILABLE" :
                           beatGrid!.confidence == 0 ? "BEAT GRID · MANUAL" : "BEAT GRID · APPROX") : "PATTERN / FOUR BARS")
                         .font(.system(size: 9, weight: .medium, design: .monospaced))
                         .foregroundStyle(Spectral.muted)
@@ -1200,23 +1226,26 @@ private struct VerticalWaveform: View {
             }
             .overlay(Rectangle().stroke(Spectral.rule, lineWidth: 0.5))
             .contentShape(Rectangle())
-            .gesture(DragGesture(minimumDistance: 8)
-                .onChanged { gesture in
+            .gesture(DragGesture(minimumDistance: 4)
+                .updating($scrub) { gesture, state, _ in
                     guard isFile, proxy.size.height > 0 else { return }
-                    let origin = scrubOrigin ?? progress
-                    if scrubOrigin == nil { scrubOrigin = origin }
-                    scrubPreview = min(1, max(0, origin -
-                        Double(gesture.translation.height / proxy.size.height) * visibleSpan))
+                    var next = state ?? Scrub(origin: progress, span: visibleSpan, preview: progress)
+                    next.preview = min(1, max(0, next.origin -
+                        Double(gesture.translation.height / proxy.size.height) * next.span))
+                    state = next
                 }
-                .onEnded { _ in
-                    if let scrubPreview, isFile { onSeek(scrubPreview) }
-                    scrubPreview = nil
-                    scrubOrigin = nil
+                .onEnded { gesture in
+                    guard isFile, proxy.size.height > 0 else { return }
+                    let origin = scrub?.origin ?? progress
+                    let span = scrub?.span ?? visibleSpan
+                    // Use the final touch coordinate, including a fast release.
+                    onSeek(min(1, max(0, origin -
+                        Double(gesture.translation.height / proxy.size.height) * span)))
                 })
         }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("Deck \(deck == 0 ? "A" : "B") waveform")
-        .accessibilityValue("Position \(Int((scrubPreview ?? progress) * 100)) percent")
+        .accessibilityValue("Position \(Int((scrub?.preview ?? progress) * 100)) percent")
     }
 }
 

@@ -8,6 +8,17 @@ import AVFAudio
 struct SpectralWaveform: Sendable {
     let peaks: [Float]
     let bands: [Float] // flattened, 5 bands per peak bin: bass to high
+    let overview: [Float]
+    init(peaks: [Float], bands: [Float]) {
+        self.peaks = peaks
+        self.bands = bands
+        let count = min(100, peaks.count)
+        self.overview = (0..<count).map { index in
+            let start = index * peaks.count / count
+            let end = (index + 1) * peaks.count / count
+            return peaks[start..<end].max() ?? 0
+        }
+    }
     static func empty(bins: Int = 180) -> SpectralWaveform {
         SpectralWaveform(peaks: Array(repeating: 0, count: bins),
                          bands: Array(repeating: 0, count: bins * 5))
@@ -19,7 +30,7 @@ struct SpectralWaveform: Sendable {
 /// length; file decode and pattern render both run on a background task.
 enum WaveformRenderer {
     static let patternBins = 180
-    static let fileBins = 4096
+    static let maximumFileBins = 65_536
 
     static func pattern(_ project: TrackProject, deck: Int) -> SpectralWaveform {
         guard (0..<2).contains(deck), let core = tb_create(48_000) else {
@@ -73,6 +84,9 @@ enum WaveformRenderer {
         let file = try AVAudioFile(forReading: url, commonFormat: .pcmFormatFloat32,
                                    interleaved: false)
         let total = Int(file.length)
+        // 10 ms detail for ordinary tracks, capped at ~1.5 MB of paint data.
+        let duration = Double(total) / file.processingFormat.sampleRate
+        let fileBins = min(maximumFileBins, max(180, Int(ceil(duration * 100))))
         guard total > 0, let buffer = AVAudioPCMBuffer(pcmFormat: file.processingFormat,
                                                        frameCapacity: 4096),
               let analysis = tb_spectral_create(file.processingFormat.sampleRate,

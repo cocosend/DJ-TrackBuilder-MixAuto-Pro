@@ -41,7 +41,10 @@ int main(){
     CHECK(tb_spectral_create(NAN,10000,64)==nullptr);
     CHECK(tb_spectral_create(48000,0,64)==nullptr);
     CHECK(tb_spectral_create(48000,10000,3)==nullptr);
-    CHECK(tb_spectral_create(48000,10000,9000)==nullptr);
+    CHECK(tb_spectral_create(48000,10000,65537)==nullptr);
+    auto *detailed = tb_spectral_create(48000,48000,65536);
+    CHECK(detailed != nullptr);
+    tb_spectral_destroy(detailed);
     CHECK(tb_spectral_consumed(nullptr)==0);
     const auto low=analyze(60);
     const auto middle=analyze(900);

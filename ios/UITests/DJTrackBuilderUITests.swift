@@ -61,6 +61,22 @@ final class DJTrackBuilderUITests: XCTestCase {
         snapshot("04-empty-file-cues")
     }
 
+    func testDeckTransportsRemainIndependentDuringModeChanges() throws {
+        app.buttons["Play Deck A"].tap()
+        XCTAssertTrue(app.buttons["Pause Deck A"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["Play Deck B"].exists)
+        app.buttons["Play Deck B"].tap()
+        XCTAssertTrue(app.buttons["Pause Deck B"].waitForExistence(timeout: 5))
+        app.buttons["MIX"].tap()
+        app.buttons["Pause Deck A"].tap()
+        XCTAssertTrue(app.buttons["Play Deck A"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["Pause Deck B"].exists)
+        app.buttons["FLOW"].tap()
+        app.buttons["Pause Deck B"].tap()
+        XCTAssertTrue(app.buttons["Play Deck B"].waitForExistence(timeout: 5))
+        snapshot("06-independent-transport")
+    }
+
     func testLandscapeKeepsBothDeckTransportsReachable() throws {
         XCUIDevice.shared.orientation = .landscapeLeft
         defer { XCUIDevice.shared.orientation = .portrait }

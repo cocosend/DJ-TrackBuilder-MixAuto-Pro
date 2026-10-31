@@ -36,7 +36,7 @@ struct TBSpectralEnvelope {
 
 extern "C" TBSpectralEnvelope *tb_spectral_create(double rate, uint64_t total, uint32_t bins) {
     if (!std::isfinite(rate) || rate < 8000. || rate > 192000. || total == 0 ||
-        total > uint64_t(192000) * 60 * 60 * 12 || bins < 16 || bins > 4096) return nullptr;
+        total > uint64_t(192000) * 60 * 60 * 12 || bins < 16 || bins > 65536) return nullptr;
     return new (std::nothrow) TBSpectralEnvelope(rate, total, bins);
 }
 extern "C" void tb_spectral_destroy(TBSpectralEnvelope *analysis) { delete analysis; }
