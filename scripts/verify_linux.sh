@@ -72,7 +72,7 @@ if [[ "${MIXAUTO_SKIP_SANITIZERS:-0}" != "1" ]] && command -v clang++ >/dev/null
     -DCMAKE_CXX_COMPILER=clang++ \
     -DCMAKE_CXX_FLAGS='-fsanitize=address,undefined -fno-omit-frame-pointer' \
     -DCMAKE_EXE_LINKER_FLAGS='-fsanitize=address,undefined' >/dev/null
-  cmake --build "$work/sanitized" --target track_audio_core_tests advanced_audio_core_tests spectral_envelope_tests pattern_stem_controls_tests master_capture_ring_tests --parallel 1 >/dev/null
+  cmake --build "$work/sanitized" --target track_audio_core_tests advanced_audio_core_tests spectral_envelope_tests pattern_stem_controls_tests master_capture_ring_tests scratch_voice_tests --parallel 1 >/dev/null
   ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=halt_on_error=1 \
     ctest --test-dir "$work/sanitized" --output-on-failure
 fi
