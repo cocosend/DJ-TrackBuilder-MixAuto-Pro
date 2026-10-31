@@ -1,8 +1,8 @@
-# DJ TrackBuilder MixAuto Pro — native iOS 0.6.0 (build 13)
+# DJ TrackBuilder MixAuto Pro — native iOS 0.6.0 (build 14)
 
 The **FIRST approved nine-page Canva** design is the only visual target: [open the canonical concept](https://www.canva.com/d/UoJgnHMYH-EJu2u). The later redesign is rejected. This is a separate project from Stripewolf Wave, ARTSS DJ Creator and DJ NOVA.
 
-**Project state: native Xcode CI passed.** [Run 41134103933](https://github.com/cocosend/DJ-TrackBuilder-MixAuto-Pro/actions/runs/41134103933) built the simulator app and the physical-iPhone architecture without signing, ran the DSP suite, both Apple audio graph integration tests and four XCUITest UI checks. The portrait and actual landscape layouts were captured in the simulator. A signed IPA and physical-iPhone audio verification are still pending Apple development signing and device testing.
+**Project state: native Xcode CI passed.** [Xcode workflow](https://github.com/cocosend/DJ-TrackBuilder-MixAuto-Pro/actions/workflows/ci.yml) built the simulator app and the physical-iPhone architecture without signing, ran the DSP suite, both Apple audio graph integration tests and four XCUITest UI checks. Build 14 adds seven adapted Stripe Waves tone presets to the FX screen. The portrait and actual landscape layouts were captured in the simulator. A signed IPA and physical-iPhone audio verification are still pending Apple development signing and device testing.
 
 ## What this source currently contains
 
@@ -11,6 +11,7 @@ The **FIRST approved nine-page Canva** design is the only visual target: [open t
 - Native iOS file-deck sources with AVAudioPlayerNode, EQ/delay, file import, play/cue, **eight live Hot Cues per deck**, sample-segment seek and bounded file loops (4/8/16 approximate beats); Apple runtime **unverified**.
 - Beat hint estimate, grid correction, conservative unwarped file transition and immediate manual fader takeover. **These do NOT provide pitch-preserving Sync or phrase-aware beat matching.**
 - Real mute/solo for *synthesized Kick/Hat/Bass* on each deck. **Imported-song four-channel STEMS NOT available.**
+- Seven adapted Stripe Waves tone routes configure per-deck cutoff, EQ and echo without replacing the saved patterns. Source preset resonance, drive, synth voices and delay timing are not emulated.
 - Native mixer WAV recording pipeline and offline original-pattern WAV render. Native recording runtime **unverified**.
 - JSON project store, backwards-compatible audio manifests, off-callback waveform analysis, C++/Swift automated tests and macOS simulator GitHub Actions template.
 

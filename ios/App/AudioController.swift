@@ -291,7 +291,8 @@ final class AudioController: ObservableObject {
                     eq.bands[band].bypass = false
                 }
                 eq.bands[3].filterType = .lowPass
-                eq.bands[3].frequency = 120 + Float(project.deckFilter[deck] * 18000)
+                eq.bands[3].frequency = Float(project.deckPresetCutoffHz[deck] ??
+                    (120 + project.deckFilter[deck] * 18000))
                 eq.bands[3].bypass = false
                 delay.delayTime = 0.375
                 delay.feedback = 28
@@ -954,10 +955,30 @@ final class AudioController: ObservableObject {
 
 
     func setDeckFilter(deck: Int, _ value: Double) {
-        guard (0..<2).contains(deck) else { return }
+        guard (0..<2).contains(deck), value.isFinite else { return }
         project.deckFilter[deck] = min(1, max(0, value))
+        project.deckPresetCutoffHz[deck] = nil
         bridge?.setDeckFilter(deck: deck, Float(project.deckFilter[deck]))
         fileEqualizers[deck].bands[3].frequency = 120 + Float(project.deckFilter[deck] * 18000)
+        scheduleSave()
+    }
+
+    /// Apply an adapted Stripe Waves tone in one control-thread transaction.
+    /// Original step velocities and imported audio are never replaced.
+    func applyTonePreset(_ preset: StripeWaveTonePreset, deck: Int) {
+        guard (0..<2).contains(deck) else { return }
+        project.deckFilter[deck] = preset.patternFilter
+        project.deckPresetCutoffHz[deck] = preset.cutoffHz
+        project.deckEQ[deck] = preset.eq
+        project.deckDelay[deck] = preset.echoWet
+        bridge?.setDeckFilter(deck: deck, Float(preset.patternFilter))
+        fileEqualizers[deck].bands[3].frequency = Float(preset.cutoffHz)
+        for band in 0..<3 {
+            bridge?.setEQ(deck: deck, band: band, db: Float(preset.eq[band]))
+            fileEqualizers[deck].bands[band].gain = Float(preset.eq[band])
+        }
+        bridge?.setDeckDelay(deck: deck, Float(preset.echoWet))
+        fileDelays[deck].wetDryMix = Float(preset.echoWet * 100)
         scheduleSave()
     }
 

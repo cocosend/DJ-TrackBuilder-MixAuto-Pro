@@ -39,6 +39,9 @@ final class DJTrackBuilderUITests: XCTestCase {
             button.tap()
             XCTAssertTrue(app.buttons["Play Deck A"].exists)
             XCTAssertTrue(app.buttons["Play Deck B"].exists)
+            if mode == "FX" {
+                XCTAssertTrue(app.buttons["Stripe Waves tone presets for Deck A"].exists)
+            }
             snapshot("02-\(mode.lowercased())")
         }
         let auto = app.buttons["Open Pattern AutoMix"]

@@ -12,6 +12,12 @@ struct TrackProjectTests {
         precondition(fresh.velocity[0][1][1][2] == 90)
         precondition(fresh.velocity[0][2][0][4] == 0)
         precondition(fresh.velocity[0][3][0][14] == 112)
+        precondition(StripeWaveTonePreset.all.map(\.id) ==
+            ["maddix", "artbat", "brejcha", "guetta", "kazantip", "legends", "modern"])
+        precondition(StripeWaveTonePreset.all.allSatisfy {
+            (120...18_120).contains($0.cutoffHz) && (0...0.5).contains($0.echoWet) &&
+            (0...1).contains($0.patternFilter) && $0.eq.count == 3
+        })
 
         var session = fresh
         session.bpm = 148
@@ -23,6 +29,7 @@ struct TrackProjectTests {
         session.deckEQ[1][0] = -3.5
         session.deckEQ[0][2] = 6.0
         session.deckDelay = [0.25, 0.4]
+        session.deckPresetCutoffHz = [420, nil]
         session.patternMute[0][1] = true
         session.patternSolo[1][2] = true
         let encoded = try JSONEncoder().encode(session)
@@ -34,12 +41,14 @@ struct TrackProjectTests {
         precondition(restored.deckEQ[1][0] == -3.5)
         precondition(restored.deckEQ[0][2] == 6.0)
         precondition(restored.deckDelay == [0.25, 0.4])
+        precondition(restored.deckPresetCutoffHz[0] == 420 && restored.deckPresetCutoffHz[1] == nil)
         precondition(restored.patternMute[0][1] && restored.patternSolo[1][2])
 
         // The legacy 0.2.0 project schema lacks EQ. Migrate without losing patterns.
         var oldPayload = try JSONSerialization.jsonObject(with: encoded) as! [String: Any]
         oldPayload.removeValue(forKey: "deckEQ")
         oldPayload.removeValue(forKey: "deckDelay")
+        oldPayload.removeValue(forKey: "deckPresetCutoffHz")
         oldPayload.removeValue(forKey: "patternMute")
         oldPayload.removeValue(forKey: "patternSolo")
         let oldData = try JSONSerialization.data(withJSONObject: oldPayload)
@@ -47,6 +56,7 @@ struct TrackProjectTests {
         precondition(oldProject.isValid && oldProject.bank == [2, 3])
         precondition(oldProject.deckEQ == [[0, 0, 0], [0, 0, 0]])
         precondition(oldProject.deckDelay == [0, 0])
+        precondition(oldProject.deckPresetCutoffHz.allSatisfy { $0 == nil })
         precondition(oldProject.patternMute == [[false, false, false], [false, false, false]])
         precondition(oldProject.patternSolo == [[false, false, false], [false, false, false]])
         precondition(oldProject.velocity[1][3][1][7] == 45)
@@ -98,6 +108,9 @@ struct TrackProjectTests {
         session.deckDelay = [0.4, 0.9]
         precondition(!session.isValid)
         session.deckDelay = [0.25, 0.4]
+        session.deckPresetCutoffHz = [Double.nan, nil]
+        precondition(!session.isValid)
+        session.deckPresetCutoffHz = [nil, nil]
         session.bpm = Double.nan
         precondition(!session.isValid)
         session.bpm = 148

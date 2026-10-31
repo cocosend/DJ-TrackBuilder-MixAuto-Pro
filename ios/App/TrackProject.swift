@@ -1,5 +1,33 @@
 import Foundation
 
+/// Adapted tone routes from the seven Stripe Waves presets. The iOS engine
+/// applies the source cutoff to imported files, and routes EQ/echo through
+/// its existing native controls; it does not emulate the donor synthesizers.
+struct StripeWaveTonePreset: Identifiable, Sendable {
+    let id: String
+    let name: String
+    let cutoffHz: Double
+    let eq: [Double] // LOW, MID, HIGH
+    let echoWet: Double
+
+    static let all: [Self] = [
+        .init(id: "maddix", name: "RUMBLE 909", cutoffHz: 420, eq: [3, 1, 1], echoWet: 0.18),
+        .init(id: "artbat", name: "SPACE ATMOSPHERE", cutoffHz: 1400, eq: [2, -1, -1], echoWet: 0.30),
+        .init(id: "brejcha", name: "HIGH-TECH", cutoffHz: 240, eq: [1, 2, -1], echoWet: 0.15),
+        .init(id: "guetta", name: "FUTURE RAVE", cutoffHz: 1800, eq: [3, 1, 2], echoWet: 0.20),
+        .init(id: "kazantip", name: "RETRO REVOLUTION", cutoffHz: 650, eq: [2, 3, 1], echoWet: 0.23),
+        .init(id: "legends", name: "PURE ACID", cutoffHz: 350, eq: [0, 4, 2], echoWet: 0.25),
+        .init(id: "modern", name: "LIVE AGGRESSION", cutoffHz: 290, eq: [3, 4, 2], echoWet: 0.11)
+    ]
+
+    /// Invert the synth's one-pole coefficient at its 48 kHz design rate.
+    /// The existing filter slider remains the source of truth for patterns.
+    var patternFilter: Double {
+        let alpha = 1 - exp(-2 * Double.pi * cutoffHz / 48_000)
+        return min(1, max(0, sqrt(max(0, (alpha - 0.004) / 0.996))))
+    }
+}
+
 /// Portable project schema; audio is generated from the saved step velocities.
 /// All banks are persisted, including ones that are not currently active.
 struct TrackProject: Codable, Sendable {
@@ -15,6 +43,9 @@ struct TrackProject: Codable, Sendable {
     var bank: [Int] = [0, 0]
     var deckGain: [Double] = [1, 1]
     var deckFilter: [Double] = [1, 1]
+    // Nil follows the manual slider. A preset keeps the exact imported-file
+    // low-pass cutoff across launches while patterns use deckFilter.
+    var deckPresetCutoffHz: [Double?] = [nil, nil]
     // Band order: LOW, MID, HIGH. Persisted alongside mixer state.
     var deckEQ: [[Double]] = [[0, 0, 0], [0, 0, 0]]
     // Optional legacy-safe per-deck live delay wet fraction 0...0.5.
@@ -40,6 +71,7 @@ struct TrackProject: Codable, Sendable {
         bank = try c.decode([Int].self, forKey: .bank)
         deckGain = try c.decode([Double].self, forKey: .deckGain)
         deckFilter = try c.decode([Double].self, forKey: .deckFilter)
+        deckPresetCutoffHz = try c.decodeIfPresent([Double?].self, forKey: .deckPresetCutoffHz) ?? [nil, nil]
         velocity = try c.decode([[[[Int]]]].self, forKey: .velocity)
         deckEQ = try c.decodeIfPresent([[Double]].self, forKey: .deckEQ) ?? [[0, 0, 0], [0, 0, 0]]
         deckDelay = try c.decodeIfPresent([Double].self, forKey: .deckDelay) ?? [0, 0]
@@ -79,6 +111,10 @@ struct TrackProject: Codable, Sendable {
               bank.count == 2, bank.allSatisfy({ (0..<4).contains($0) }),
               deckGain.count == 2, deckGain.allSatisfy({ $0.isFinite && (0...1).contains($0) }),
               deckFilter.count == 2, deckFilter.allSatisfy({ $0.isFinite && (0...1).contains($0) }),
+              deckPresetCutoffHz.count == 2,
+              deckPresetCutoffHz.allSatisfy({ value in
+                  value.map { $0.isFinite && (120...18_120).contains($0) } ?? true
+              }),
               deckDelay.count == 2, deckDelay.allSatisfy({ $0.isFinite && (0...0.5).contains($0) }),
               patternMute.count == 2, patternMute.allSatisfy({ $0.count == 3 }),
               patternSolo.count == 2, patternSolo.allSatisfy({ $0.count == 3 }),

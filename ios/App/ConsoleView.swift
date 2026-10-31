@@ -631,6 +631,25 @@ struct ConsoleView: View {
             VStack(alignment: .leading, spacing: 12) {
                 titleRow("FX / LIVE PERFORMANCE", "SYNTH")
                 pickerForDeck
+                Menu {
+                    ForEach(StripeWaveTonePreset.all) { preset in
+                        Button(preset.name) { audio.applyTonePreset(preset, deck: selectedDeck) }
+                    }
+                } label: {
+                    HStack {
+                        Text("STRIPE WAVES / TONE PRESETS")
+                        Spacer()
+                        Image(systemName: "chevron.down")
+                    }
+                    .font(.system(size: 11, weight: .heavy, design: .monospaced))
+                    .foregroundStyle(accent(selectedDeck))
+                    .padding(14)
+                    .background(Spectral.raised, in: RoundedRectangle(cornerRadius: 10))
+                }
+                .accessibilityLabel("Stripe Waves tone presets for Deck \(deckName(selectedDeck))")
+                Text("ADAPTED FILTER, EQ + ECHO · ORIGINAL PATTERNS STAY IN PLACE")
+                    .font(.system(size: 9, weight: .medium, design: .monospaced))
+                    .foregroundStyle(Spectral.muted)
                 Text("TRIGGER ORIGINAL SYNTH VOICES")
                     .font(.system(size: 10, weight: .bold, design: .monospaced))
                     .foregroundStyle(Spectral.muted)
