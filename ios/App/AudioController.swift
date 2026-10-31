@@ -505,6 +505,7 @@ final class AudioController: ObservableObject {
                         }
                         output = converted
                     }
+                    LoopSeam.smooth(output)
                     return PreparedFileLoop(buffer: output,
                                             startFrame: start, frameCount: count)
                 }

@@ -129,4 +129,22 @@ final class AudioGraphIntegrationTests: XCTestCase {
         XCTAssertGreaterThan(second, 0.02, "Loop became silent after source buffer ended")
         XCTAssertLessThan(abs(first - second), 0.06)
     }
+
+    func testLoopSeamRemovesDiscontinuityWithoutChangingTheBody() throws {
+        let format = try testFormat()
+        let count: AVAudioFrameCount = 4_800
+        let loop = try XCTUnwrap(AVAudioPCMBuffer(pcmFormat: format, frameCapacity: count))
+        let pcm = try XCTUnwrap(loop.floatChannelData)
+        loop.frameLength = count
+        for i in 0..<Int(count) {
+            pcm[0][i] = i < 2_400 ? 0.75 : -0.75
+            pcm[1][i] = i < 2_400 ? -0.25 : 0.25
+        }
+        LoopSeam.smooth(loop)
+        XCTAssertEqual(pcm[0][0], pcm[0][Int(count)-1], accuracy: 0.00001)
+        XCTAssertEqual(pcm[1][0], pcm[1][Int(count)-1], accuracy: 0.00001)
+        XCTAssertEqual(pcm[0][Int(count)/2], -0.75, accuracy: 0.00001)
+        XCTAssertEqual(pcm[1][Int(count)/2], 0.25, accuracy: 0.00001)
+        XCTAssertEqual(loop.frameLength, count)
+    }
 }
