@@ -109,7 +109,5 @@ secrets, set in GitHub rather than committed or sent in chat:
 
 After those are configured, run **Actions → Signed iPhone development IPA → Run
 workflow**. The workflow checks the profile's Team ID and bundle ID, builds an
-archive and uploads an IPA artifact only if export succeeds. The current CI
-artifact contains unsigned simulator and device builds and cannot be installed
-on a physical iPhone. Development signing also does not verify real speaker,
+archive and uploads an IPA artifact only if export succeeds. The current CI artifact includes an unsigned `Payload`-structured IPA for signing tools, as well as simulator and device builds. The unsigned IPA cannot be installed on a physical iPhone until it is signed with a matching Apple provisioning profile. Development signing also does not verify real speaker,
 Bluetooth or recording behavior; exercise those after installation.

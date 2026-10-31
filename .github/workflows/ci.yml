@@ -112,9 +112,14 @@ jobs:
             xcrun simctl io "${{ steps.sim.outputs.id }}" screenshot "$RUNNER_TEMP/MixAutoArtifacts/First-Canva-Cockpit-Simulator.png" || true
           fi
           if test -d "$RUNNER_TEMP/MixAutoDeviceDerivedData/Build/Products/Release-iphoneos/DJTrackBuilderMixAutoPro.app"; then
+            DEVICE_APP="$RUNNER_TEMP/MixAutoDeviceDerivedData/Build/Products/Release-iphoneos/DJTrackBuilderMixAutoPro.app"
             ditto -c -k --sequesterRsrc --keepParent \
-              "$RUNNER_TEMP/MixAutoDeviceDerivedData/Build/Products/Release-iphoneos/DJTrackBuilderMixAutoPro.app" \
+              "$DEVICE_APP" \
               "$RUNNER_TEMP/MixAutoArtifacts/MixAuto-iPhone-Unsigned-NOT-INSTALLABLE.zip"
+            mkdir -p "$RUNNER_TEMP/MixAutoUnsignedIPA/Payload"
+            ditto "$DEVICE_APP" "$RUNNER_TEMP/MixAutoUnsignedIPA/Payload/DJTrackBuilderMixAutoPro.app"
+            (cd "$RUNNER_TEMP/MixAutoUnsignedIPA" && zip -qry \
+              "$RUNNER_TEMP/MixAutoArtifacts/MixAuto-UNSIGNED-REQUIRES-APPLE-SIGNING.ipa" Payload)
           fi
           if test -d "$RUNNER_TEMP/MixAutoUITests.xcresult"; then
             ditto -c -k --sequesterRsrc --keepParent "$RUNNER_TEMP/MixAutoUITests.xcresult" "$RUNNER_TEMP/MixAutoArtifacts/MixAutoUITests-xcresult.zip"
