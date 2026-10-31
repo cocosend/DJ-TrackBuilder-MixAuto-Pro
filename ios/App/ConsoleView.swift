@@ -261,7 +261,8 @@ struct ConsoleView: View {
                             hotCues: audio.fileDecks[deck]?.hotCues,
                             duration: audio.fileDecks[deck]?.duration,
                             zoom: waveformZoom,
-                            onSeek: { audio.seekDeck(deck, normalized: $0) })
+                            onScratch: { audio.scratchDeck(deck, normalized: $0) },
+                            onSeek: { audio.finishScratch(deck, normalized: $0) })
                             .id(audio.fileDecks[deck]?.fileName ?? "pattern-\(deck)")
                     }
                 }
@@ -1097,6 +1098,7 @@ private struct VerticalWaveform: View {
     let hotCues: [Double?]?
     let duration: Double?
     let zoom: Double
+    let onScratch: (Double) -> Void
     let onSeek: (Double) -> Void
     private struct Scrub {
         let origin: Double
@@ -1217,7 +1219,7 @@ private struct VerticalWaveform: View {
                             .foregroundStyle(isActive ? accent : Spectral.muted)
                     }
                     Spacer()
-                    Text(scrub != nil ? "RELEASE TO SEEK" : isFile ? (beatGrid == nil ? "FILE · GRID UNAVAILABLE" :
+                    Text(scrub != nil ? (isActive ? "SCRATCH · RELEASE TO PLAY" : "RELEASE TO SEEK") : isFile ? (beatGrid == nil ? "FILE · GRID UNAVAILABLE" :
                           beatGrid!.confidence == 0 ? "BEAT GRID · MANUAL" : "BEAT GRID · APPROX") : "PATTERN / FOUR BARS")
                         .font(.system(size: 9, weight: .medium, design: .monospaced))
                         .foregroundStyle(Spectral.muted)
@@ -1233,6 +1235,14 @@ private struct VerticalWaveform: View {
                     next.preview = min(1, max(0, next.origin -
                         Double(gesture.translation.height / proxy.size.height) * next.span))
                     state = next
+                }
+                .onChanged { gesture in
+                    guard isFile, proxy.size.height > 0 else { return }
+                    let origin = scrub?.origin ?? progress
+                    let span = scrub?.span ?? visibleSpan
+                    if isActive { onScratch(min(1, max(0, origin -
+                        Double(gesture.translation.height / proxy.size.height) * span)))
+                    }
                 }
                 .onEnded { gesture in
                     guard isFile, proxy.size.height > 0 else { return }

@@ -148,4 +148,47 @@ final class AudioGraphIntegrationTests: XCTestCase {
         XCTAssertEqual(pcm[1][Int(count)/2], 0.25, accuracy: 0.00001)
         XCTAssertEqual(loop.frameLength, count)
     }
+
+    func testScratchReversesInFileMixerAndOtherDeckContinues() throws {
+        let format = try testFormat()
+        let engine = AVAudioEngine()
+        let fileBus = AVAudioMixerNode()
+        let scratch = try XCTUnwrap(ScratchBridge(sampleRate))
+        defer { engine.stop() }
+        let source = AVAudioSourceNode(format: format) { _, _, frames, output in
+            scratch.render(frames, output)
+        }
+        let other = AVAudioPlayerNode()
+        engine.attach(source); engine.attach(fileBus); engine.attach(other)
+        engine.connect(source, to: fileBus, format: format)
+        engine.connect(fileBus, to: engine.mainMixerNode, format: format)
+        engine.connect(other, to: engine.mainMixerNode, format: format)
+        let tone = try fileWithTone(440, duration: 1.5)
+        defer { try? FileManager.default.removeItem(at: tone) }
+        let file = try AVAudioFile(forReading: tone)
+        other.scheduleFile(file, at: nil)
+        let count: AVAudioFrameCount = 48_000
+        let clip = try XCTUnwrap(AVAudioPCMBuffer(pcmFormat: format, frameCapacity: count))
+        clip.frameLength = count
+        let pcm = try XCTUnwrap(clip.floatChannelData)
+        for i in 0..<Int(count) {
+            pcm[0][i] = 0.2
+            pcm[1][i] = -0.2
+        }
+        XCTAssertTrue(scratch.load(clip, at: 0))
+        scratch.target(0.5)
+        scratch.active(true)
+        try engine.enableManualRenderingMode(.offline, format: format, maximumFrameCount: 1024)
+        try engine.start()
+        other.play()
+        let first = try render(engine, seconds: 0.3)
+        scratch.target(0.1)
+        let second = try render(engine, seconds: 0.3)
+        XCTAssertGreaterThan(first, 0.05)
+        XCTAssertGreaterThan(second, 0.05)
+        XCTAssertLessThan(scratch.position(), 0.25)
+        scratch.active(false)
+        let otherOnly = try render(engine, seconds: 0.3)
+        XCTAssertGreaterThan(otherOnly, 0.05, "Other deck must survive scratch release")
+    }
 }
