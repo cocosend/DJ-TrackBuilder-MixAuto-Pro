@@ -1,3 +1,13 @@
+# Current native iOS gate — 0.6.0 build 13
+
+The canonical iOS repository is [DJ-TrackBuilder-MixAuto-Pro](https://github.com/cocosend/DJ-TrackBuilder-MixAuto-Pro). [Xcode CI run 41134103933](https://github.com/cocosend/DJ-TrackBuilder-MixAuto-Pro/actions/runs/41134103933) passed on the current source: C++ DSP checks, iOS simulator build, unsigned physical-iPhone architecture build, two native Apple audio graph tests and four UI tests. The fourth UI test verifies actual landscape rotation and that both deck transports, import buttons and crossfader remain reachable. Simulator portrait and landscape images were reviewed against the first Canva cockpit direction.
+
+**Installable iPhone release: pending.** The successful device build is unsigned. The `Signed iPhone development IPA` workflow requires an Apple Development certificate, matching provisioning profile and team configured as repository secrets. No signed IPA, physical-device audio run or TestFlight distribution is claimed. Imported-song STEMS, pitch-preserving file SYNC and phrase-aware imported-track AutoMix remain out of scope in 0.6.0.
+
+The earlier checkpoint notes below are historical and do not describe the current Xcode CI state.
+
+---
+
 # DJ TrackBuilder MixAuto Pro — 0.5.2 current source gate
 
 > Route-loss/interrupt safety, cancellation propagation, and allowlisted ZIP packaging were fixed and regression-tested on Linux. See [0.5.2 engineering checkpoint](ENGINEERING-CHECKPOINT-0.5.2.md). **No Apple SDK or iPhone test has been performed. This is not an IPA or TestFlight.**

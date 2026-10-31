@@ -1,13 +1,13 @@
-# DJ TrackBuilder MixAuto Pro — native source checkpoint 0.6.0 (Apple simulator CI gate)
+# DJ TrackBuilder MixAuto Pro — native iOS 0.6.0 (build 13)
 
 The **FIRST approved nine-page Canva** design is the only visual target: [open the canonical concept](https://www.canva.com/d/UoJgnHMYH-EJu2u). The later redesign is rejected. This is a separate project from Stripewolf Wave, ARTSS DJ Creator and DJ NOVA.
 
-**Project state: iOS Simulator build verified.** The source is in its own private GitHub repository. Xcode 16.4 built and launched the app in an iPhone 16 Pro simulator; both native audio graph tests and all three UI tests passed. A signed IPA, physical iPhone installation and on-device audio verification still require Apple signing and a connected device.
+**Project state: native Xcode CI passed.** [Run 41134103933](https://github.com/cocosend/DJ-TrackBuilder-MixAuto-Pro/actions/runs/41134103933) built the simulator app and the physical-iPhone architecture without signing, ran the DSP suite, both Apple audio graph integration tests and four XCUITest UI checks. The portrait and actual landscape layouts were captured in the simulator. A signed IPA and physical-iPhone audio verification are still pending Apple development signing and device testing.
 
 ## What this source currently contains
 
 - C++17 real-time dual-deck synth sequencer with four 16-step pattern banks, original Kick/Hat/Bass voices, velocity, swing, smoothed EQ/filters/echo, crossfader and Pattern AutoMix.
-- SwiftUI iPhone-first DJ Cockpit following the graphite/cyan/coral original Canva identity, two distinct decks with vertical PCM-derived **5-band spectral waveform energy**, fixed transport and mode rail.
+- SwiftUI iPhone-first DJ Cockpit following the graphite/cyan/coral original Canva identity, two distinct decks with vertical PCM-derived **5-band spectral waveform energy**, fixed transport and a landscape control rail. Deck A is cyan and Deck B coral; idle waveform rendering pauses when its deck stops.
 - Native iOS file-deck sources with AVAudioPlayerNode, EQ/delay, file import, play/cue, **eight live Hot Cues per deck**, sample-segment seek and bounded file loops (4/8/16 approximate beats); Apple runtime **unverified**.
 - Beat hint estimate, grid correction, conservative unwarped file transition and immediate manual fader takeover. **These do NOT provide pitch-preserving Sync or phrase-aware beat matching.**
 - Real mute/solo for *synthesized Kick/Hat/Bass* on each deck. **Imported-song four-channel STEMS NOT available.**
@@ -20,7 +20,7 @@ The **FIRST approved nine-page Canva** design is the only visual target: [open t
 scripts/verify_linux.sh
 ```
 
-Checks 5 Release C++ suites, 5 Clang sanitizers suites, portable Swift Foundation model/algorithm tests (including route safety and background cancellation), Swift syntax parsing and real 16-second WAV format/peaks. No connected Mac/Xcode or physical iPhone available in this environment.
+Checks 5 Release C++ suites, 5 Clang sanitizers suites, portable Swift Foundation model/algorithm tests (including route safety and background cancellation), Swift syntax parsing and real 16-second WAV format/peaks. The macOS GitHub Actions runner supplies Xcode; this local workspace does not have Xcode or a connected iPhone.
 
 ## Build and exercise real Apple Audio Units on a Mac
 
@@ -28,7 +28,7 @@ Version 0.6.0 introduces an XcodeGen XCTest **integration target** using Apple's
 actual `AVAudioEngine` in offline/manual mode. It feeds **two independently
 scheduled audio files into EQ/Delay/mixer** and verifies nonzero PCM output;
 a second test checks repeated AVAudioPlayerNode `.loops` output. XCUITest UI
-smokes open WAVE/MIX/STEMS/BUILDER/FX/AUTO and save simulator screenshots. These
+smokes open WAVE/MIX/STEMS/BUILDER/FX/AUTO, rotate to landscape, check both deck controls remain reachable and save simulator screenshots. These
 checks passed on the GitHub Actions macOS runner. They cannot prove iPhone audio latency, speaker routing or master
 recording.
 
@@ -55,7 +55,7 @@ xcodebuild -project DJTrackBuilderMixAutoPro.xcodeproj \
   -configuration Debug CODE_SIGNING_ALLOWED=NO build
 ```
 
-Then validate both imported decks, file loops, live WAV recording, accessibility and route changes on an actual iPhone. The Xcode build commands are **instructions**, not proof they succeeded.
+Then validate both imported decks, file loops, live WAV recording, accessibility and route changes on an actual iPhone. The macOS CI run linked above is the build and test evidence; these commands are also available for a local Mac.
 
 ## Safety and reliability corrections in 0.5.1
 
@@ -77,7 +77,7 @@ Then validate both imported decks, file loops, live WAV recording, accessibility
 ## Checkpoint packaging
 
 ```bash
-python3 scripts/package_source.py /path/to/DJ-TrackBuilder-MixAuto-Pro-0.5.0-Source-Checkpoint.zip
+python3 scripts/package_source.py /path/to/DJ-TrackBuilder-MixAuto-Pro-0.6.0-Source-Checkpoint.zip
 ```
 
 The source-only ZIP includes a `SOURCE_SHA256SUMS.txt` manifest and excludes generated build directories, artifacts and private credentials. No paid/third-party music or third-party DJ artwork is bundled. Do **not** request release approval until Xcode, iPhone sound, navigation and original Canva visual QA are actually proven.
@@ -87,7 +87,7 @@ The source-only ZIP includes a `SOURCE_SHA256SUMS.txt` manifest and excludes gen
 
 Portable DSP and Swift Foundation tests: run `scripts/verify_linux.sh`.
 Apple's audio graph integration tests: **2/2 passed** on iPhone 16 Pro Simulator.
-SwiftUI UI smoke: **3/3 passed**; simulator app and screenshot are in the CI artifact.
+SwiftUI UI smoke: **4/4 passed**, including actual landscape rotation and reachable A/B transport; simulator app, screenshots and test result bundle are in the CI artifact.
 Portable DSP/Linux CI also passed. A physical iPhone installation requires a
 development signing team/provisioning profile and a connected iPhone or a
 TestFlight distribution setup. Preserve the first nine-page Canva design as
