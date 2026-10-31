@@ -242,7 +242,8 @@ struct ConsoleView: View {
                             beatGrid: audio.fileDecks[deck]?.beatGrid,
                             hotCues: audio.fileDecks[deck]?.hotCues,
                             duration: audio.fileDecks[deck]?.duration,
-                            zoom: waveformZoom)
+                            zoom: waveformZoom,
+                            onSeek: { audio.seekDeck(deck, normalized: $0) })
                     }
                 }
             }
@@ -1076,15 +1077,20 @@ private struct VerticalWaveform: View {
     let hotCues: [Double?]?
     let duration: Double?
     let zoom: Double
+    let onSeek: (Double) -> Void
+    @State private var scrubOrigin: Double?
+    @State private var scrubPreview: Double?
 
     var body: some View {
         GeometryReader { proxy in
+            let displayedProgress = scrubPreview ?? progress
+            let visibleSpan = (isFile ? 0.14 : 0.30) / max(1, zoom)
             ZStack {
                 Spectral.bg
                 Canvas { context, size in
                     let n = waveform.peaks.count
                     guard n > 0 else { return }
-                    let span = (isFile ? 0.14 : 0.30) / max(1, zoom)
+                    let span = visibleSpan
                     let lines = min(230, max(80, Int(size.height / 2.1)))
                     let stepHeight = size.height / CGFloat(lines)
                     var groups = [Path](repeating: Path(), count: Spectral.spectrum.count)
@@ -1093,23 +1099,31 @@ private struct VerticalWaveform: View {
                         // frequency-band energy determines *where* each color
                         // appears. No decorative amplitude-index color mapping.
                         let relative = (Double(i) / Double(lines) - 0.5) * span
-                        let location = progress + relative
-                        let wrapped = isFile ? min(0.999, max(0, location)) :
+                        let location = displayedProgress + relative
+                        let wrapped = isFile ? min(1, max(0, location)) :
                             (location - floor(location))
-                        let bin = min(n - 1, max(0, Int(wrapped * Double(n))))
-                        let peak = waveform.peaks[bin]
+                        let preciseBin = wrapped * Double(max(0, n - 1))
+                        let bin = min(n - 1, max(0, Int(preciseBin)))
+                        let nextBin = min(n - 1, bin + 1)
+                        let blend = CGFloat(preciseBin - Double(bin))
+                        let peak = CGFloat(waveform.peaks[bin]) * (1 - blend) +
+                                   CGFloat(waveform.peaks[nextBin]) * blend
                         let half = max(1.1, CGFloat(peak) * size.width * 0.46)
                         let y = (CGFloat(i) + 0.5) * stepHeight
                         let base = bin * Spectral.spectrum.count
-                        guard base + Spectral.spectrum.count <= waveform.bands.count else { continue }
-                        let magnitudes = (0..<Spectral.spectrum.count).map {
-                            max(0, CGFloat(waveform.bands[base + $0]))
+                        let nextBase = nextBin * Spectral.spectrum.count
+                        guard nextBase + Spectral.spectrum.count <= waveform.bands.count else { continue }
+                        var sum = CGFloat.zero
+                        for band in 0..<Spectral.spectrum.count {
+                            sum += max(0, CGFloat(waveform.bands[base + band]) * (1 - blend) +
+                                          CGFloat(waveform.bands[nextBase + band]) * blend)
                         }
-                        let sum = magnitudes.reduce(CGFloat.zero, +)
                         if sum <= 0.0001 { continue }
                         var accumulated = CGFloat.zero
                         for band in 0..<Spectral.spectrum.count {
-                            let part = half * magnitudes[band] / sum
+                            let magnitude = max(0, CGFloat(waveform.bands[base + band]) * (1 - blend) +
+                                               CGFloat(waveform.bands[nextBase + band]) * blend)
+                            let part = half * magnitude / sum
                             let inner = accumulated
                             let outer = accumulated + part
                             groups[band].move(to: CGPoint(x: size.width / 2 - outer, y: y))
@@ -1127,8 +1141,8 @@ private struct VerticalWaveform: View {
                     // accepted approximate beat phase is available, place
                     // hints at actual decoded sample-time positions only.
                     if let beatGrid, let duration, beatGrid.isValid, duration > 0 {
-                        let start = max(0, (progress - span * 0.5) * duration)
-                        let end = min(duration, (progress + span * 0.5) * duration)
+                        let start = max(0, (displayedProgress - span * 0.5) * duration)
+                        let end = min(duration, (displayedProgress + span * 0.5) * duration)
                         let period = beatGrid.beatIntervalSeconds
                         let first = max(0, Int(ceil((start - beatGrid.firstBeatSeconds) / period)))
                         let count = min(250, max(0, Int(ceil((end - start) / period)) + 2))
@@ -1138,7 +1152,7 @@ private struct VerticalWaveform: View {
                         for index in Swift.stride(from: 0, to: count, by: skip) {
                             let t = beatGrid.beatTime(first + index)
                             guard t >= start, t <= end else { continue }
-                            let y = CGFloat(0.5 + (t / duration - progress) / span) * size.height
+                            let y = CGFloat(0.5 + (t / duration - displayedProgress) / span) * size.height
                             marks.move(to: CGPoint(x: 0, y: y))
                             marks.addLine(to: CGPoint(x: size.width, y: y))
                         }
@@ -1149,7 +1163,7 @@ private struct VerticalWaveform: View {
                         for (slot, moment) in hotCues.enumerated() {
                             guard let moment, moment.isFinite else { continue }
                             let location = moment / duration
-                            let local = 0.5 + (location - progress) / span
+                            let local = 0.5 + (location - displayedProgress) / span
                             guard (0...1).contains(local) else { continue }
                             let y = CGFloat(local) * size.height
                             cueLines.move(to: CGPoint(x: 0, y: y))
@@ -1177,7 +1191,7 @@ private struct VerticalWaveform: View {
                             .foregroundStyle(isActive ? accent : Spectral.muted)
                     }
                     Spacer()
-                    Text(isFile ? (beatGrid == nil ? "FILE · GRID UNAVAILABLE" :
+                    Text(scrubPreview != nil ? "RELEASE TO SEEK" : isFile ? (beatGrid == nil ? "FILE · GRID UNAVAILABLE" :
                           beatGrid!.confidence == 0 ? "BEAT GRID · MANUAL" : "BEAT GRID · APPROX") : "PATTERN / FOUR BARS")
                         .font(.system(size: 9, weight: .medium, design: .monospaced))
                         .foregroundStyle(Spectral.muted)
@@ -1185,10 +1199,24 @@ private struct VerticalWaveform: View {
                 .padding(11)
             }
             .overlay(Rectangle().stroke(Spectral.rule, lineWidth: 0.5))
+            .contentShape(Rectangle())
+            .gesture(DragGesture(minimumDistance: 8)
+                .onChanged { gesture in
+                    guard isFile, proxy.size.height > 0 else { return }
+                    let origin = scrubOrigin ?? progress
+                    if scrubOrigin == nil { scrubOrigin = origin }
+                    scrubPreview = min(1, max(0, origin -
+                        Double(gesture.translation.height / proxy.size.height) * visibleSpan))
+                }
+                .onEnded { _ in
+                    if let scrubPreview, isFile { onSeek(scrubPreview) }
+                    scrubPreview = nil
+                    scrubOrigin = nil
+                })
         }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("Deck \(deck == 0 ? "A" : "B") waveform")
-        .accessibilityValue("Position \(Int(progress * 100)) percent")
+        .accessibilityValue("Position \(Int((scrubPreview ?? progress) * 100)) percent")
     }
 }
 
