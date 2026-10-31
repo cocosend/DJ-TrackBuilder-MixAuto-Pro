@@ -18,7 +18,8 @@ struct SpectralWaveform: Sendable {
 /// C++ analysis is stream-based and bounded in memory independent of track
 /// length; file decode and pattern render both run on a background task.
 enum WaveformRenderer {
-    static let binCount = 180
+    static let patternBins = 180
+    static let fileBins = 4096
 
     static func pattern(_ project: TrackProject, deck: Int) -> SpectralWaveform {
         guard (0..<2).contains(deck), let core = tb_create(48_000) else {
@@ -47,7 +48,7 @@ enum WaveformRenderer {
         }
         tb_set_playing(core, 1)
         let frameCount = Int(4 * 4 * 60 / project.bpm * 48_000)
-        guard let analysis = tb_spectral_create(48_000, UInt64(frameCount), UInt32(binCount)) else {
+        guard let analysis = tb_spectral_create(48_000, UInt64(frameCount), UInt32(patternBins)) else {
             return .empty()
         }
         defer { tb_spectral_destroy(analysis) }
@@ -65,7 +66,7 @@ enum WaveformRenderer {
             }
             rendered += amount
         }
-        return collect(analysis)
+        return collect(analysis, bins: patternBins)
     }
 
     static func audioFile(_ url: URL) throws -> SpectralWaveform {
@@ -75,7 +76,7 @@ enum WaveformRenderer {
         guard total > 0, let buffer = AVAudioPCMBuffer(pcmFormat: file.processingFormat,
                                                        frameCapacity: 4096),
               let analysis = tb_spectral_create(file.processingFormat.sampleRate,
-                                                UInt64(total), UInt32(binCount)) else {
+                                                UInt64(total), UInt32(fileBins)) else {
             return .empty()
         }
         defer { tb_spectral_destroy(analysis) }
@@ -90,15 +91,15 @@ enum WaveformRenderer {
             _ = tb_spectral_push(analysis, channels[0], second, count)
             readFrames += count
         }
-        return collect(analysis)
+        return collect(analysis, bins: fileBins)
     }
 
-    private static func collect(_ analysis: OpaquePointer) -> SpectralWaveform {
-        var peaks = Array(repeating: Float.zero, count: binCount)
-        var bands = Array(repeating: Float.zero, count: binCount * 5)
+    private static func collect(_ analysis: OpaquePointer, bins: Int) -> SpectralWaveform {
+        var peaks = Array(repeating: Float.zero, count: bins)
+        var bands = Array(repeating: Float.zero, count: bins * 5)
         let succeeded = peaks.withUnsafeMutableBufferPointer { p in
             bands.withUnsafeMutableBufferPointer { b in
-                tb_spectral_finish(analysis, p.baseAddress, b.baseAddress, UInt32(binCount)) != 0
+                tb_spectral_finish(analysis, p.baseAddress, b.baseAddress, UInt32(bins)) != 0
             }
         }
         return succeeded ? SpectralWaveform(peaks: peaks, bands: bands) : .empty()
