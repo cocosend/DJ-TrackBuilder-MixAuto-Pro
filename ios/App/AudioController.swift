@@ -584,6 +584,14 @@ final class AudioController: ObservableObject {
         errorMessage = nil
     }
 
+    func seekDeck(_ deck: Int, normalized progress: Double) {
+        guard (0..<2).contains(deck), let file = fileAudio[deck], file.length > 0,
+              progress.isFinite else { return }
+        let frame = min(file.length - 1,
+                        AVAudioFramePosition(max(0, min(1, progress)) * Double(file.length)))
+        seekDeck(deck, to: Double(frame) / file.processingFormat.sampleRate)
+    }
+
     /// Set/delete/jump actual file hot cues without touching other deck.
     func storeHotCue(_ deck: Int, slot: Int) {
         guard (0..<2).contains(deck), let current = fileDecks[deck],
@@ -1226,8 +1234,11 @@ final class AudioController: ObservableObject {
         guard let bridge else { return }
         let phase = bridge.autoMixState()
         if !timedBlendActive {
-            liveCrossfader = Double(bridge.effectiveCrossfader())
-            updateFileVolumes()
+            let effective = Double(bridge.effectiveCrossfader())
+            if abs(effective - liveCrossfader) > 0.001 {
+                liveCrossfader = effective
+                updateFileVolumes()
+            }
         }
         if autoMixTargetDeck != nil && phase != 0 { autoMixWasActive = true }
         if phase == 0 && autoMixWasActive, let target = autoMixTargetDeck {
