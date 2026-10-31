@@ -764,13 +764,25 @@ final class AudioController: ObservableObject {
         _ = scheduleFile(deck, file: file, at: 0)
     }
 
+    private func freezeFileDeck(_ deck: Int) {
+        if scratchEngaged[deck], let file = fileAudio[deck] {
+            let audibleFrame = min(file.length - 1, currentFrame(deck))
+            abortScratch(deck)
+            fileGeneration[deck] &+= 1
+            filePlayers[deck].stop()
+            fileScheduled[deck] = false
+            _ = scheduleFile(deck, file: file, at: audibleFrame)
+        } else {
+            if fileAudio[deck] != nil { filePausedFrame[deck] = currentFrame(deck) }
+            abortScratch(deck)
+        }
+    }
+
     private func pauseDeck(_ deck: Int) {
         cancelBeatHintBlend()
         cancelTimedBlend()
         guard (0..<2).contains(deck) else { return }
-        if scratchEngaged[deck] { filePausedFrame[deck] = currentFrame(deck) }
-        abortScratch(deck)
-        if fileAudio[deck] != nil { filePausedFrame[deck] = currentFrame(deck) }
+        freezeFileDeck(deck)
         deckPlaying[deck] = false
         filePlayers[deck].pause()
         bridge?.setDeckEnabled(deck: deck, false)
@@ -781,8 +793,7 @@ final class AudioController: ObservableObject {
         cancelBeatHintBlend()
         cancelTimedBlend()
         for deck in 0..<2 {
-            if fileAudio[deck] != nil { filePausedFrame[deck] = currentFrame(deck) }
-            abortScratch(deck)
+            freezeFileDeck(deck)
             deckPlaying[deck] = false
             filePlayers[deck].pause()
             bridge?.setDeckEnabled(deck: deck, false)
