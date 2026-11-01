@@ -2,14 +2,16 @@
 #include <algorithm>
 #include <atomic>
 #include <cmath>
-#include <memory>
+#include <cstdint>
 #include <vector>
 
 struct TBClip {
     std::vector<float> left, right;
     double start;
-    TBClip(const float *l, const float *r, size_t count, double origin)
-        : left(l, l + count), right(r, r + count), start(origin) {}
+    std::uint64_t generation;
+    TBClip(const float *l, const float *r, size_t count, double origin,
+           std::uint64_t serial)
+        : left(l, l + count), right(r, r + count), start(origin), generation(serial) {}
 };
 struct TBScratchVoice {
     const double rate;
@@ -18,8 +20,8 @@ struct TBScratchVoice {
     std::atomic<unsigned> readers{0};
     std::atomic<double> target{0}, position{0};
     std::atomic<bool> active{false};
-    std::atomic<unsigned> generation{0};
-    unsigned seenGeneration{0}; // audio thread only
+    std::uint64_t nextGeneration{0}; // control thread only
+    std::uint64_t seenGeneration{0}; // audio thread only
     double phase{0}, speed{0}, gain{0}; // audio thread only
     explicit TBScratchVoice(double r) : rate(r) {}
 };
@@ -41,12 +43,9 @@ extern "C" int tb_scratch_load(TBScratchVoice *v, const float *l, const float *r
                                   size_t count, double origin) {
     if (!v || !l || !r || !std::isfinite(origin) || origin < 0 ||
         count < 32 || count > 192000 * 12) return 0;
-    auto *next = new TBClip(l, r, count, origin);
-    v->active.store(false, std::memory_order_release);
+    auto *next = new TBClip(l, r, count, origin, ++v->nextGeneration);
     auto *old = v->clip.exchange(next, std::memory_order_acq_rel);
     if (old) v->retired.push_back(old);
-    v->target.store(origin, std::memory_order_release);
-    v->generation.fetch_add(1, std::memory_order_release);
     tb_scratch_reap(v);
     return 1;
 }
@@ -66,12 +65,15 @@ extern "C" void tb_scratch_render(TBScratchVoice *v, float *l, float *r, size_t 
     const TBClip *clip = v->clip.load(std::memory_order_acquire);
     const bool on = v->active.load(std::memory_order_acquire) && clip;
     const double target = v->target.load(std::memory_order_relaxed);
-    const unsigned generation = v->generation.load(std::memory_order_acquire);
-    if (clip && generation != v->seenGeneration) {
-        v->seenGeneration = generation;
-        v->phase = std::clamp((target-clip->start)*v->rate,0.,double(clip->left.size()-2));
-        v->speed = 0;
-        v->gain = 0;
+    if (clip && clip->generation != v->seenGeneration) {
+        const bool continuing = v->seenGeneration != 0 && on;
+        v->seenGeneration = clip->generation;
+        // Retain the last audible position and envelope when the control
+        // thread swaps in a new window. Resetting either creates an audible
+        // dropout on every refill while the finger is still moving.
+        const double resume = continuing ? v->position.load(std::memory_order_relaxed) : target;
+        v->phase = std::clamp((resume-clip->start)*v->rate,0.,double(clip->left.size()-2));
+        if (!continuing) { v->speed = 0; v->gain = 0; }
     }
     if (on && v->gain <= 0) { v->phase = std::clamp((target-clip->start)*v->rate,0.,double(clip->left.size()-2)); v->speed=0; }
     for (size_t i=0;i<count;++i) {
