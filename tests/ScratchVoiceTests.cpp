@@ -14,6 +14,19 @@ int main() {
     for(int i=0;i<60;++i)tb_scratch_render(voice,l.data(),r.data(),l.size());
     const double middle=tb_scratch_position(voice);
     assert(middle>5.45 && middle<5.55 && l[400]>0.1 && std::abs(l[400]+r[400])<1e-5);
+    // A new PCM window covering the same timeline must not restart the
+    // needle at the window origin or fade audible scratching to silence.
+    std::vector<float> nextL(n),nextR(n);
+    for(size_t i=0;i<n;++i) {
+        nextL[i]=float(i)/n+0.1f;
+        nextR[i]=-nextL[i];
+    }
+    assert(tb_scratch_load(voice,nextL.data(),nextR.data(),n,5.1));
+    tb_scratch_target(voice,5.55);
+    tb_scratch_render(voice,l.data(),r.data(),l.size());
+    assert(tb_scratch_position(voice)>5.45);
+    assert(l[0]>0.4f && l[400]>0.4f);
+    assert(std::abs(l[400]+r[400])<1e-5);
     tb_scratch_target(voice,5.15);
     for(int i=0;i<60;++i)tb_scratch_render(voice,l.data(),r.data(),l.size());
     assert(tb_scratch_position(voice)<middle-0.25); // real reverse transport
